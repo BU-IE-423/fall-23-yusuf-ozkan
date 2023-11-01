@@ -26,6 +26,534 @@ Syntax highlighted code block
 [Link](url) and ![Image](src)
 ```
 
+---
+title: "IE 423 Project Part 1"
+output: html_notebook
+---
+
+
+```{r}
+
+file_path <- "C:/Users/Pc/OneDrive/Masaüstü/all_ticks_wide.csv"
+
+data <- read.csv(file_path, header = TRUE)
+
+# Convert the timestamps to date-time format
+data$timestamp <- as.POSIXct(data$timestamp)
+
+```
+
+# Code for Selecting Stocks and Time Frame (Optional)
+
+```{r}
+
+###### Code for selecting stocks part 1
+
+for (col_name in colnames(data)) {
+  straight_list <- 0
+  for (i in 1:50012) {
+    if (is.na(data[i, col_name])) {
+      straight_list <- c(straight_list, i)
+    }
+  }
+  print(col_name)
+  max_gap <- max(diff(straight_list)) - 1  # Subtract 1 to account for the starting value
+  print(paste("Maximum Gap:", max_gap))
+  
+}
+
+###### Code for selecting stocks part 2
+
+selected_stocks1 <- c("AKBNK", "ASELS", "BRISA", "EREGL", "GARAN", "ISCTR", "KRDMD", "TCELL", "THYAO", "TUPRS", "VAKBN", "YKBNK")
+
+# Loop through the selected stock columns
+for (col_name in selected_stocks1) {
+  empties <- 0
+  # Loop through the rows in the dataset
+  for (i in 1:50012) {
+    # Check if the value in the specified column and row is NA
+    if (is.na(data[i, col_name])) {
+      empties <- empties + 1
+    }
+  }
+  # Print the stock name and the number of NA values
+  print(col_name)
+  print(paste("Num of NA:", empties))
+}
+
+###### Code for selecting time frame
+mystocks <- c("EREGL", "KRDMD", "THYAO")
+
+na_count <- 10000
+
+for (k in 1:40) {
+  
+  na_count_eregl <- sum(is.na(data$EREGL[(261+k*780):(18980+k*780)]))
+  na_count_krdmd <- sum(is.na(data$KRDMD[(261+k*780):(18980+k*780)]))
+  na_count_thyao <- sum(is.na(data$THYAO[(261+k*780):(18980+k*780)]))
+  na_count_ykbnk <- sum(is.na(data$YKBNK[(261+k*780):(18980+k*780)]))
+  na_count_garan <- sum(is.na(data$GARAN[(261+k*780):(18980+k*780)]))
+  na_count_tcell <- sum(is.na(data$TCELL[(261+k*780):(18980+k*780)]))
+
+  na_count <- c(na_count, na_count_eregl+na_count_krdmd+na_count_thyao+na_count_ykbnk+na_count_garan+na_count_tcell)
+}
+
+na_count
+
+index <- which(unlist(na_count) == min(na_count))
+
+index
+```
+
+
+```{r}
+#Loading required packages
+library(xts)
+library(zoo)
+library(ggplot2)
+library(gridExtra)
+
+indexes = 23375:39010
+
+```
+
+# Boxplot and 3 Sigma Control Charts for EREGL
+
+```{r}
+eregl_time_series <- xts(data$EREGL[indexes], order.by = data$timestamp[indexes])
+
+# Extract the year and month from the timestamps
+year_month <- format(index(eregl_time_series), "%Y-%m")
+
+# Create a data frame with the values, year, and month
+data_df <- data.frame(
+  Value = coredata(eregl_time_series),
+  Year = as.numeric(format(index(eregl_time_series), "%Y")),
+  Month = as.numeric(format(index(eregl_time_series), "%m"))
+)
+
+# Create a list to store control chart plots
+control_plots <- list()
+
+# Set the number of rows and columns for the grid
+num_rows <- 2  # Number of rows
+num_cols <- 3  # Number of columns
+
+# Loop through unique year-month combinations
+par(mfrow = c(num_rows, num_cols))  # Adjust rows and columns as needed
+unique_dates <- unique(year_month)
+for (ym in unique_dates) {
+  subset_data <- eregl_time_series[year_month == ym]
+  boxplot(subset_data, main = paste("Boxplot for", ym), ylab = "EREGL Value")
+  cleaned_data <- na.omit(subset_data)
+  mean_value <- mean(cleaned_data)
+  std_dev <- sd(cleaned_data)
+  lower_limit <- mean_value - 3 * std_dev
+  upper_limit <- mean_value + 3 * std_dev
+  subset_df <- fortify.zoo(subset_data)
+  
+  # Set custom y-axis limits
+  y_min <- min(c(lower_limit, cleaned_data))
+  y_max <- max(c(upper_limit, cleaned_data))
+  
+  # Create a control chart plot
+  plot <- ggplot(data = subset_df, aes(x = Index, y = subset_data)) +
+    geom_point() +
+    geom_line(y = mean_value, color = "blue") +
+    geom_line(y = lower_limit, color = "red") +
+    geom_line(y = upper_limit, color = "red") +
+    ylim(y_min, y_max) +  # Set custom y-axis limits
+    labs(x = "Timestamp", y = "EREGL Value", title = paste(ym))
+  
+  control_plots[[ym]] <- plot
+}
+
+# Reset the layout to default (1x1) if needed
+par(mfrow = c(1, 1))
+
+plot(eregl_time_series, lty = 1, xlab = "Date", ylab = "Value", main = "EREGL Stock Price")
+
+# Create a boxplot using ggplot2 and facet by year and month
+ggplot(data_df, aes(x = factor(Month), y = Value)) +
+  geom_boxplot() +
+  facet_wrap(~Year, nrow = 1) +
+  labs(x = "Month", y = "Value", title = "Time Series of Boxplots for EREGL Stock")
+
+# Create separate grids for subsets
+num_subsets <- 4  # Number of subsets
+subset_size <- length(unique(year_month)) / num_subsets
+subset_grids <- list()
+
+for (i in 1:num_subsets) {
+  subset_grids[[i]] <- grid.arrange(grobs = control_plots[((i - 1) * subset_size + 1):(i * subset_size)], nrow = num_rows, ncol = num_cols)
+}
+
+```
+
+# Boxplot and 3 Sigma Control Charts for KRDMD
+
+```{r}
+krdmd_time_series <- xts(data$KRDMD[indexes], order.by = data$timestamp[indexes])
+
+# Extract the year and month from the timestamps
+year_month <- format(index(krdmd_time_series), "%Y-%m")
+
+# Create a data frame with the values, year, and month
+data_df <- data.frame(
+  Value = coredata(krdmd_time_series),
+  Year = as.numeric(format(index(krdmd_time_series), "%Y")),
+  Month = as.numeric(format(index(krdmd_time_series), "%m"))
+)
+
+# Create a list to store control chart plots
+control_plots <- list()
+
+# Set the number of rows and columns for the grid
+num_rows <- 2  # Number of rows
+num_cols <- 3  # Number of columns
+
+# Loop through unique year-month combinations
+par(mfrow = c(num_rows, num_cols))  # Adjust rows and columns as needed
+unique_dates <- unique(year_month)
+for (ym in unique_dates) {
+  subset_data <- krdmd_time_series[year_month == ym]
+  boxplot(subset_data, main = paste("Boxplot for", ym), ylab = "KRDMD Value")
+  cleaned_data <- na.omit(subset_data)
+  mean_value <- mean(cleaned_data)
+  std_dev <- sd(cleaned_data)
+  lower_limit <- mean_value - 3 * std_dev
+  upper_limit <- mean_value + 3 * std_dev
+  subset_df <- fortify.zoo(subset_data)
+  
+  # Set custom y-axis limits
+  y_min <- min(c(lower_limit, cleaned_data))
+  y_max <- max(c(upper_limit, cleaned_data))
+  
+  # Create a control chart plot
+  plot <- ggplot(data = subset_df, aes(x = Index, y = subset_data)) +
+    geom_point() +
+    geom_line(y = mean_value, color = "blue") +
+    geom_line(y = lower_limit, color = "red") +
+    geom_line(y = upper_limit, color = "red") +
+    ylim(y_min, y_max) +  # Set custom y-axis limits
+    labs(x = "Timestamp", y = "KRDMD Value", title = paste(ym))
+  
+  control_plots[[ym]] <- plot
+}
+
+# Reset the layout to default (1x1) if needed
+par(mfrow = c(1, 1))
+
+plot(krdmd_time_series, lty = 1, xlab = "Date", ylab = "Value", main = "KRDMD Stock Price")
+
+# Create a boxplot using ggplot2 and facet by year and month
+ggplot(data_df, aes(x = factor(Month), y = Value)) +
+  geom_boxplot() +
+  facet_wrap(~Year, nrow = 1) +
+  labs(x = "Month", y = "Value", title = "Time Series of Boxplots for KRDMD Stock")
+
+# Create separate grids for subsets
+num_subsets <- 4  # Number of subsets
+subset_size <- length(unique(year_month)) / num_subsets
+subset_grids <- list()
+
+for (i in 1:num_subsets) {
+  subset_grids[[i]] <- grid.arrange(grobs = control_plots[((i - 1) * subset_size + 1):(i * subset_size)], nrow = num_rows, ncol = num_cols)
+}
+```
+
+# Boxplot and 3 Sigma Control Charts for THYAO
+
+```{r}
+thyao_time_series <- xts(data$THYAO[indexes], order.by = data$timestamp[indexes])
+
+# Extract the year and month from the timestamps
+year_month <- format(index(thyao_time_series), "%Y-%m")
+
+# Create a data frame with the values, year, and month
+data_df <- data.frame(
+  Value = coredata(thyao_time_series),
+  Year = as.numeric(format(index(thyao_time_series), "%Y")),
+  Month = as.numeric(format(index(thyao_time_series), "%m"))
+)
+
+# Create a list to store control chart plots
+control_plots <- list()
+
+# Set the number of rows and columns for the grid
+num_rows <- 2  # Number of rows
+num_cols <- 3  # Number of columns
+
+# Loop through unique year-month combinations
+par(mfrow = c(num_rows, num_cols))  # Adjust rows and columns as needed
+unique_dates <- unique(year_month)
+for (ym in unique_dates) {
+  subset_data <- thyao_time_series[year_month == ym]
+  boxplot(subset_data, main = paste("Boxplot for", ym), ylab = "THYAO Value")
+  cleaned_data <- na.omit(subset_data)
+  mean_value <- mean(cleaned_data)
+  std_dev <- sd(cleaned_data)
+  lower_limit <- mean_value - 3 * std_dev
+  upper_limit <- mean_value + 3 * std_dev
+  subset_df <- fortify.zoo(subset_data)
+  
+  # Set custom y-axis limits
+  y_min <- min(c(lower_limit, cleaned_data))
+  y_max <- max(c(upper_limit, cleaned_data))
+  
+  # Create a control chart plot
+  plot <- ggplot(data = subset_df, aes(x = Index, y = subset_data)) +
+    geom_point() +
+    geom_line(y = mean_value, color = "blue") +
+    geom_line(y = lower_limit, color = "red") +
+    geom_line(y = upper_limit, color = "red") +
+    ylim(y_min, y_max) +  # Set custom y-axis limits
+    labs(x = "Timestamp", y = "THYAO Value", title = paste(ym))
+  
+  control_plots[[ym]] <- plot
+}
+
+# Reset the layout to default (1x1) if needed
+par(mfrow = c(1, 1))
+
+plot(thyao_time_series, lty = 1, xlab = "Date", ylab = "Value", main = "THYAO Stock Price")
+
+# Create a boxplot using ggplot2 and facet by year and month
+ggplot(data_df, aes(x = factor(Month), y = Value)) +
+  geom_boxplot() +
+  facet_wrap(~Year, nrow = 1) +
+  labs(x = "Month", y = "Value", title = "Time Series of Boxplots for THYAO Stock")
+
+# Create separate grids for subsets
+num_subsets <- 4  # Number of subsets
+subset_size <- length(unique(year_month)) / num_subsets
+subset_grids <- list()
+
+for (i in 1:num_subsets) {
+  subset_grids[[i]] <- grid.arrange(grobs = control_plots[((i - 1) * subset_size + 1):(i * subset_size)], nrow = num_rows, ncol = num_cols)
+}
+```
+
+# Boxplot and 3 Sigma Control Charts for GARAN
+
+```{r}
+garan_time_series <- xts(data$GARAN[indexes], order.by = data$timestamp[indexes])
+
+# Extract the year and month from the timestamps
+year_month <- format(index(garan_time_series), "%Y-%m")
+
+# Create a data frame with the values, year, and month
+data_df <- data.frame(
+  Value = coredata(garan_time_series),
+  Year = as.numeric(format(index(garan_time_series), "%Y")),
+  Month = as.numeric(format(index(garan_time_series), "%m"))
+)
+
+# Create a list to store control chart plots
+control_plots <- list()
+
+# Set the number of rows and columns for the grid
+num_rows <- 2  # Number of rows
+num_cols <- 3  # Number of columns
+
+# Loop through unique year-month combinations
+par(mfrow = c(num_rows, num_cols))  # Adjust rows and columns as needed
+unique_dates <- unique(year_month)
+for (ym in unique_dates) {
+  subset_data <- garan_time_series[year_month == ym]
+  boxplot(subset_data, main = paste("Boxplot for", ym), ylab = "GARAN Value")
+  cleaned_data <- na.omit(subset_data)
+  mean_value <- mean(cleaned_data)
+  std_dev <- sd(cleaned_data)
+  lower_limit <- mean_value - 3 * std_dev
+  upper_limit <- mean_value + 3 * std_dev
+  subset_df <- fortify.zoo(subset_data)
+  
+  # Set custom y-axis limits
+  y_min <- min(c(lower_limit, cleaned_data))
+  y_max <- max(c(upper_limit, cleaned_data))
+  
+  # Create a control chart plot
+  plot <- ggplot(data = subset_df, aes(x = Index, y = subset_data)) +
+    geom_point() +
+    geom_line(y = mean_value, color = "blue") +
+    geom_line(y = lower_limit, color = "red") +
+    geom_line(y = upper_limit, color = "red") +
+    ylim(y_min, y_max) +  # Set custom y-axis limits
+    labs(x = "Timestamp", y = "GARAN Value", title = paste(ym))
+  
+  control_plots[[ym]] <- plot
+}
+
+# Reset the layout to default (1x1) if needed
+par(mfrow = c(1, 1))
+
+plot(garan_time_series, lty = 1, xlab = "Date", ylab = "Value", main = "GARAN Stock Price")
+
+# Create a boxplot using ggplot2 and facet by year and month
+ggplot(data_df, aes(x = factor(Month), y = Value)) +
+  geom_boxplot() +
+  facet_wrap(~Year, nrow = 1) +
+  labs(x = "Month", y = "Value", title = "Time Series of Boxplots for GARAN Stock")
+
+# Create separate grids for subsets
+num_subsets <- 4  # Number of subsets
+subset_size <- length(unique(year_month)) / num_subsets
+subset_grids <- list()
+
+for (i in 1:num_subsets) {
+  subset_grids[[i]] <- grid.arrange(grobs = control_plots[((i - 1) * subset_size + 1):(i * subset_size)], nrow = num_rows, ncol = num_cols)
+}
+
+```
+
+# Boxplot and 3 Sigma Control Charts for YKBNK
+
+```{r}
+ykbnk_time_series <- xts(data$YKBNK[indexes], order.by = data$timestamp[indexes])
+
+# Extract the year and month from the timestamps
+year_month <- format(index(ykbnk_time_series), "%Y-%m")
+
+# Create a data frame with the values, year, and month
+data_df <- data.frame(
+  Value = coredata(ykbnk_time_series),
+  Year = as.numeric(format(index(ykbnk_time_series), "%Y")),
+  Month = as.numeric(format(index(ykbnk_time_series), "%m"))
+)
+
+# Create a list to store control chart plots
+control_plots <- list()
+
+# Set the number of rows and columns for the grid
+num_rows <- 2  # Number of rows
+num_cols <- 3  # Number of columns
+
+# Loop through unique year-month combinations
+par(mfrow = c(num_rows, num_cols))  # Adjust rows and columns as needed
+unique_dates <- unique(year_month)
+for (ym in unique_dates) {
+  subset_data <- ykbnk_time_series[year_month == ym]
+  boxplot(subset_data, main = paste("Boxplot for", ym), ylab = "YKBNK Value")
+  cleaned_data <- na.omit(subset_data)
+  mean_value <- mean(cleaned_data)
+  std_dev <- sd(cleaned_data)
+  lower_limit <- mean_value - 3 * std_dev
+  upper_limit <- mean_value + 3 * std_dev
+  subset_df <- fortify.zoo(subset_data)
+  
+  # Set custom y-axis limits
+  y_min <- min(c(lower_limit, cleaned_data))
+  y_max <- max(c(upper_limit, cleaned_data))
+  
+  # Create a control chart plot
+  plot <- ggplot(data = subset_df, aes(x = Index, y = subset_data)) +
+    geom_point() +
+    geom_line(y = mean_value, color = "blue") +
+    geom_line(y = lower_limit, color = "red") +
+    geom_line(y = upper_limit, color = "red") +
+    ylim(y_min, y_max) +  # Set custom y-axis limits
+    labs(x = "Timestamp", y = "YKBNK Value", title = paste(ym))
+  
+  control_plots[[ym]] <- plot
+}
+
+# Reset the layout to default (1x1) if needed
+par(mfrow = c(1, 1))
+
+plot(ykbnk_time_series, lty = 1, xlab = "Date", ylab = "Value", main = "YKBNK Stock Price")
+
+# Create a boxplot using ggplot2 and facet by year and month
+ggplot(data_df, aes(x = factor(Month), y = Value)) +
+  geom_boxplot() +
+  facet_wrap(~Year, nrow = 1) +
+  labs(x = "Month", y = "Value", title = "Time Series of Boxplots for YKBNK Stock")
+
+# Create separate grids for subsets
+num_subsets <- 4  # Number of subsets
+subset_size <- length(unique(year_month)) / num_subsets
+subset_grids <- list()
+
+for (i in 1:num_subsets) {
+  subset_grids[[i]] <- grid.arrange(grobs = control_plots[((i - 1) * subset_size + 1):(i * subset_size)], nrow = num_rows, ncol = num_cols)
+}
+
+```
+
+# Boxplot and 3 Sigma Control Charts for TCELL
+
+```{r}
+tcell_time_series <- xts(data$TCELL[indexes], order.by = data$timestamp[indexes])
+
+# Extract the year and month from the timestamps
+year_month <- format(index(tcell_time_series), "%Y-%m")
+
+# Create a data frame with the values, year, and month
+data_df <- data.frame(
+  Value = coredata(tcell_time_series),
+  Year = as.numeric(format(index(tcell_time_series), "%Y")),
+  Month = as.numeric(format(index(tcell_time_series), "%m"))
+)
+
+# Create a list to store control chart plots
+control_plots <- list()
+
+# Set the number of rows and columns for the grid
+num_rows <- 2  # Number of rows
+num_cols <- 3  # Number of columns
+
+# Loop through unique year-month combinations
+par(mfrow = c(num_rows, num_cols))  # Adjust rows and columns as needed
+unique_dates <- unique(year_month)
+for (ym in unique_dates) {
+  subset_data <- tcell_time_series[year_month == ym]
+  boxplot(subset_data, main = paste("Boxplot for", ym), ylab = "TCELL Value")
+  cleaned_data <- na.omit(subset_data)
+  mean_value <- mean(cleaned_data)
+  std_dev <- sd(cleaned_data)
+  lower_limit <- mean_value - 3 * std_dev
+  upper_limit <- mean_value + 3 * std_dev
+  subset_df <- fortify.zoo(subset_data)
+  
+  # Set custom y-axis limits
+  y_min <- min(c(lower_limit, cleaned_data))
+  y_max <- max(c(upper_limit, cleaned_data))
+  
+  # Create a control chart plot
+  plot <- ggplot(data = subset_df, aes(x = Index, y = subset_data)) +
+    geom_point() +
+    geom_line(y = mean_value, color = "blue") +
+    geom_line(y = lower_limit, color = "red") +
+    geom_line(y = upper_limit, color = "red") +
+    ylim(y_min, y_max) +  # Set custom y-axis limits
+    labs(x = "Timestamp", y = "TCELL Value", title = paste(ym))
+  
+  control_plots[[ym]] <- plot
+}
+
+# Reset the layout to default (1x1) if needed
+par(mfrow = c(1, 1))
+
+plot(tcell_time_series, lty = 1, xlab = "Date", ylab = "Value", main = "TCELL Stock Price")
+
+# Create a boxplot using ggplot2 and facet by year and month
+ggplot(data_df, aes(x = factor(Month), y = Value)) +
+  geom_boxplot() +
+  facet_wrap(~Year, nrow = 1) +
+  labs(x = "Month", y = "Value", title = "Time Series of Boxplots for TCELL Stock")
+
+# Create separate grids for subsets
+num_subsets <- 4  # Number of subsets
+subset_size <- length(unique(year_month)) / num_subsets
+subset_grids <- list()
+
+for (i in 1:num_subsets) {
+  subset_grids[[i]] <- grid.arrange(grobs = control_plots[((i - 1) * subset_size + 1):(i * subset_size)], nrow = num_rows, ncol = num_cols)
+}
+
+```
+
+
 For more details see [GitHub Flavored Markdown](https://guides.github.com/features/mastering-markdown/).
 
 ### Jekyll Themes
