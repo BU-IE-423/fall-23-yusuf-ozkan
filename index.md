@@ -13,7 +13,6 @@ This is [link to my repository on GitHub](https://https://github.com/BU-IE-423/f
 
 
 
-
 For more details see [GitHub Flavored Markdown](https://guides.github.com/features/mastering-markdown/).
 
 ### Jekyll Themes
