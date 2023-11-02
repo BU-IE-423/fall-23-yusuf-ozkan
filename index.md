@@ -1,30 +1,16 @@
-## Welcome to GitHub Pages
+## Welcome to My Progress Journal
 
-You can use the [editor on GitHub](https://https://github.com/BU-IE-423/fall-23-yusuf-ozkan/edit/main/index.md) to maintain and preview the content for your website in Markdown files.
+Hi, I am Yusufcan Özkan.
+This is my [Progress Journal Website]([https://jekyllrb.com/](https://bu-ie-423.github.io/fall-23-yusuf-ozkan/))
+For the IE423 class in Bogazici University
 
-Whenever you commit to this repository, GitHub Pages will run [Jekyll](https://jekyllrb.com/) to rebuild the pages in your site, from the content in your Markdown files.
+This is [link to my repository on GitHub](https://https://github.com/BU-IE-423/fall-23-yusuf-ozkan/) 
 
-### Markdown
+### Project Part 1
+* [Stock Analysis](IE423_Project_Part1_final.html): Statistical Process Analysis for 6 different stock data
 
-Markdown is a lightweight and easy-to-use syntax for styling your writing. It includes conventions for
 
-```markdown
-Syntax highlighted code block
 
-# Header 1
-## Header 2
-### Header 3
-
-- Bulleted
-- List
-
-1. Numbered
-2. List
-
-**Bold** and _Italic_ and `Code` text
-
-[Link](url) and ![Image](src)
-```
 
 
 
