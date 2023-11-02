@@ -1,0 +1,1298 @@
+---
+title: "IE 423 Project Part 1"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning=FALSE)
+```
+
+## 4.1. Data Retrieval & Manipulation
+
+```{r}
+
+file_path <- "/Users/sudeyilmaz/Desktop/IE\ 423/all_ticks_wide.csv"
+
+data <- read.csv(file_path, header = TRUE)
+
+# Convert the timestamps to date-time format
+data$timestamp <- as.POSIXct(data$timestamp)
+
+```
+
+# Code for Selecting Stocks and Time Frame (Optional)
+
+```{r, results = "hide"}
+
+###### Code for selecting stocks part 1
+
+#The maximum straight time span with complete data was searched for, and the first elimination was made accordingly.
+
+for (col_name in colnames(data)) {
+  straight_list <- 0
+  for (i in 1:50012) {
+    if (is.na(data[i, col_name])) {
+      straight_list <- c(straight_list, i)
+    }
+  }
+  print(col_name)
+  max_gap <- max(diff(straight_list)) - 1  # Subtract 1 to account for the starting value
+  print(paste("Maximum Gap:", max_gap))
+  
+}
+
+###### Code for selecting stocks part 2
+
+#After a series of stocks was selected according to the first elimination, the number of not available data in each one of them was checked.
+
+selected_stocks1 <- c("AKBNK", "ASELS", "BRISA", "EREGL", "GARAN", "ISCTR", "KRDMD", "TCELL", "THYAO", "TUPRS", "VAKBN", "YKBNK")
+
+# Loop through the selected stock columns
+for (col_name in selected_stocks1) {
+  empties <- 0
+  # Loop through the rows in the dataset
+  for (i in 1:50012) {
+    # Check if the value in the specified column and row is NA
+    if (is.na(data[i, col_name])) {
+      empties <- empties + 1
+    }
+  }
+  # Print the stock name and the number of NA values
+  print(col_name)
+  print(paste("Num of NA:", empties))
+}
+
+###### Code for selecting time frame
+
+# The approximate time in which the total number of not available data is minimum was checked for.
+
+mystocks <- c("EREGL", "KRDMD", "THYAO", "YKBNK", "GARAN", "TCELL")
+
+na_count <- 10000
+
+for (k in 1:40) {
+  
+  na_count_eregl <- sum(is.na(data$EREGL[(261+k*780):(18980+k*780)]))
+  na_count_krdmd <- sum(is.na(data$KRDMD[(261+k*780):(18980+k*780)]))
+  na_count_thyao <- sum(is.na(data$THYAO[(261+k*780):(18980+k*780)]))
+  na_count_ykbnk <- sum(is.na(data$YKBNK[(261+k*780):(18980+k*780)]))
+  na_count_garan <- sum(is.na(data$GARAN[(261+k*780):(18980+k*780)]))
+  na_count_tcell <- sum(is.na(data$TCELL[(261+k*780):(18980+k*780)]))
+
+  na_count <- c(na_count, na_count_eregl+na_count_krdmd+na_count_thyao+na_count_ykbnk+na_count_garan+na_count_tcell)
+}
+
+na_count
+
+index <- which(unlist(na_count) == min(na_count))
+
+index
+```
+
+# The Issue with Missing Values
+
+In the data analysis, no stock devoid of missing values for a straight 2-year time frame could be found. Thus, missing values were identified in the data examined, but they were accounted for by no more than 2% of the data. A deliberate choice was made not to fill in or impute these missing values; instead, data points with missing values were excluded from the analysis.
+
+The reasoning behind this decision was rooted in the concern that introducing bias into the analysis could be facilitated by filling missing values. When filling in missing values, a judgment about what values to use has to be made, and these choices can significantly influence the statistical measures relied upon, such as the mean and standard deviation. Incorrect identification of outliers could potentially be the result of this process.
+
+By opting to discard data points with missing values, the aim was to preserve the integrity of the existing dataset. This means that the analysis was exclusively conducted with the available data, and no assumptions or estimations were made to complete the missing information.
+
+In the end, a valid and cautious method for identifying outliers within the dataset was provided by the approach. Utilizing both boxplots and the 3-sigma rule allowed for a more comprehensive understanding of potential outliers while ensuring that the data used for analysis remained as close as possible to the original observed values.
+
+## 4.2. Identification of Outliers using Boxplots and 3-Sigma Limits
+
+```{r, results = "hide"}
+#Loading required packages
+library(zoo)
+library(xts)
+library(ggplot2)
+library(gridExtra)
+
+indexes = 23375:39010
+
+```
+
+# Boxplot and 3 Sigma Control Charts for EREGL
+
+```{r}
+eregl_time_series <- xts(data$EREGL[indexes], order.by = data$timestamp[indexes])
+
+# Extract the year and month from the timestamps
+year_month <- format(index(eregl_time_series), "%Y-%m")
+
+datetime <- format(index(eregl_time_series), "%Y-%m-%d %H:%M")
+
+# Create a data frame with the values, year, and month
+data_df <- data.frame(
+  Value = coredata(eregl_time_series),
+  Year = as.numeric(format(index(eregl_time_series), "%Y")),
+  Month = as.numeric(format(index(eregl_time_series), "%m"))
+)
+
+# Create a list to store control chart plots and outlier timestamps
+control_plots <- list()
+eregl_outlier_timestamps_control <- list()  # Store control chart outlier timestamps
+eregl_outlier_timestamps_boxplot <- list()  # Store boxplot outlier timestamps
+
+# Set the number of rows and columns for the grid
+num_rows <- 2  # Number of rows
+num_cols <- 3  # Number of columns
+
+# Loop through unique year-month combinations
+par(mfrow = c(num_rows, num_cols))  # Adjust rows and columns as needed
+unique_dates <- unique(year_month)
+for (ym in unique_dates) {
+  subset_data <- eregl_time_series[year_month == ym]
+  boxplot(subset_data, main = paste("Boxplot for", ym), ylab = "EREGL Value")
+  cleaned_data <- na.omit(subset_data)
+  mean_value <- mean(cleaned_data)
+  std_dev <- sd(cleaned_data)
+  lower_limit <- mean_value - 3 * std_dev
+  upper_limit <- mean_value + 3 * std_dev
+  subset_df <- fortify.zoo(subset_data)
+  
+  # Sort the data in ascending order
+  sorted_data <- sort(cleaned_data)
+
+  # Calculate the first and the third quartile and the interquartile range (IQR)
+  q1 <- quantile(sorted_data, 0.25)
+  q3 <- quantile(sorted_data, 0.75)
+  iqr_value <- q3 - q1
+  
+  # Identify and store outlier timestamps from the control chart
+  outlier_indices_control <- which(subset_data < lower_limit | subset_data > upper_limit)
+  if (length(outlier_indices_control) > 0) {
+    eregl_outlier_timestamps_control[[ym]] <- unique(index(subset_data)[outlier_indices_control])
+  }
+  
+  # Identify and store outlier timestamps from the boxplot
+  outlier_indices_boxplot <- which(subset_data < q1-1.5*iqr_value | subset_data > q3+1.5*iqr_value)
+  if (length(outlier_indices_boxplot) > 0) {
+    eregl_outlier_timestamps_boxplot[[ym]] <- unique(index(subset_data)[outlier_indices_boxplot])
+  }
+  
+  # Set custom y-axis limits
+  y_min <- min(c(lower_limit, cleaned_data))
+  y_max <- max(c(upper_limit, cleaned_data))
+  
+  # Create a control chart plot
+  plot <- ggplot(data = subset_df, aes(x = Index, y = subset_data)) +
+    geom_point() +
+    geom_line(y = mean_value, color = "blue") +
+    geom_line(y = lower_limit, color = "red") +
+    geom_line(y = upper_limit, color = "red") +
+    ylim(y_min, y_max) +  # Set custom y-axis limits
+    labs(x = "Timestamp", y = "EREGL Value", title = paste(ym))
+  
+  control_plots[[ym]] <- plot
+}
+
+# Reset the layout to default (1x1) if needed
+par(mfrow = c(1, 1))
+
+plot(eregl_time_series, lty = 1, xlab = "Date", ylab = "Value", main = "EREGL Stock Price")
+
+# Create a boxplot using ggplot2 and facet by year and month
+ggplot(data_df, aes(x = factor(Month), y = Value)) +
+  geom_boxplot() +
+  facet_wrap(~Year, nrow = 1) +
+  labs(x = "Month", y = "Value", title = "Time Series of Boxplots for EREGL Stock")
+
+# Create separate grids for subsets
+num_subsets <- 4  # Number of subsets
+subset_size <- length(unique(year_month)) / num_subsets
+subset_grids <- list()
+
+for (i in 1:num_subsets) {
+  subset_grids[[i]] <- grid.arrange(grobs = control_plots[((i - 1) * subset_size + 1):(i * subset_size)], nrow = num_rows, ncol = num_cols)
+}
+
+print("The outliers of EREGL data detected by control charts:")
+print(eregl_outlier_timestamps_control)
+
+
+print("The outliers of EREGL data detected by boxplots:")
+print(eregl_outlier_timestamps_boxplot)
+
+```
+
+# Boxplot and 3 Sigma Control Charts for KRDMD
+
+```{r}
+krdmd_time_series <- xts(data$KRDMD[indexes], order.by = data$timestamp[indexes])
+
+# Extract the year and month from the timestamps
+year_month <- format(index(krdmd_time_series), "%Y-%m")
+
+# Create a data frame with the values, year, and month
+data_df <- data.frame(
+  Value = coredata(krdmd_time_series),
+  Year = as.numeric(format(index(krdmd_time_series), "%Y")),
+  Month = as.numeric(format(index(krdmd_time_series), "%m"))
+)
+
+# Create a list to store control chart plots and outlier timestamps
+control_plots <- list()
+krdmd_outlier_timestamps_control <- list()  # Store control chart outlier timestamps
+krdmd_outlier_timestamps_boxplot <- list()  # Store boxplot outlier timestamps
+
+# Set the number of rows and columns for the grid
+num_rows <- 2  # Number of rows
+num_cols <- 3  # Number of columns
+
+# Loop through unique year-month combinations
+par(mfrow = c(num_rows, num_cols))  # Adjust rows and columns as needed
+unique_dates <- unique(year_month)
+for (ym in unique_dates) {
+  subset_data <- krdmd_time_series[year_month == ym]
+  boxplot(subset_data, main = paste("Boxplot for", ym), ylab = "KRDMD Value")
+  cleaned_data <- na.omit(subset_data)
+  mean_value <- mean(cleaned_data)
+  std_dev <- sd(cleaned_data)
+  lower_limit <- mean_value - 3 * std_dev
+  upper_limit <- mean_value + 3 * std_dev
+  subset_df <- fortify.zoo(subset_data)
+  
+  # Sort the data in ascending order
+  sorted_data <- sort(cleaned_data)
+
+  # Calculate the first and the third quartile and the interquartile range (IQR)
+  q1 <- quantile(sorted_data, 0.25)
+  q3 <- quantile(sorted_data, 0.75)
+  iqr_value <- q3 - q1
+  
+  # Identify and store outlier timestamps from the control chart
+  outlier_indices_control <- which(subset_data < lower_limit | subset_data > upper_limit)
+  if (length(outlier_indices_control) > 0) {
+    krdmd_outlier_timestamps_control[[ym]] <- unique(index(subset_data)[outlier_indices_control])
+  }
+  
+  # Identify and store outlier timestamps from the boxplot
+  outlier_indices_boxplot <- which(subset_data < q1-1.5*iqr_value | subset_data > q3+1.5*iqr_value)
+  if (length(outlier_indices_boxplot) > 0) {
+    krdmd_outlier_timestamps_boxplot[[ym]] <- unique(index(subset_data)[outlier_indices_boxplot])
+  }
+  
+  # Set custom y-axis limits
+  y_min <- min(c(lower_limit, cleaned_data))
+  y_max <- max(c(upper_limit, cleaned_data))
+  
+  # Create a control chart plot
+  plot <- ggplot(data = subset_df, aes(x = Index, y = subset_data)) +
+    geom_point() +
+    geom_line(y = mean_value, color = "blue") +
+    geom_line(y = lower_limit, color = "red") +
+    geom_line(y = upper_limit, color = "red") +
+    ylim(y_min, y_max) +  # Set custom y-axis limits
+    labs(x = "Timestamp", y = "KRDMD Value", title = paste(ym))
+  
+  control_plots[[ym]] <- plot
+}
+
+# Reset the layout to default (1x1) if needed
+par(mfrow = c(1, 1))
+
+plot(krdmd_time_series, lty = 1, xlab = "Date", ylab = "Value", main = "KRDMD Stock Price")
+
+# Create a boxplot using ggplot2 and facet by year and month
+ggplot(data_df, aes(x = factor(Month), y = Value)) +
+  geom_boxplot() +
+  facet_wrap(~Year, nrow = 1) +
+  labs(x = "Month", y = "Value", title = "Time Series of Boxplots for KRDMD Stock")
+
+# Create separate grids for subsets
+num_subsets <- 4  # Number of subsets
+subset_size <- length(unique(year_month)) / num_subsets
+subset_grids <- list()
+
+for (i in 1:num_subsets) {
+  subset_grids[[i]] <- grid.arrange(grobs = control_plots[((i - 1) * subset_size + 1):(i * subset_size)], nrow = num_rows, ncol = num_cols)
+}
+
+print("The outliers of KRDMD data detected by control charts:")
+krdmd_outlier_timestamps_control
+
+print("The outliers of KRDMD data detected by boxplots:")
+krdmd_outlier_timestamps_boxplot
+
+```
+
+# Boxplot and 3 Sigma Control Charts for THYAO
+
+```{r}
+thyao_time_series <- xts(data$THYAO[indexes], order.by = data$timestamp[indexes])
+
+# Extract the year and month from the timestamps
+year_month <- format(index(thyao_time_series), "%Y-%m")
+
+# Create a data frame with the values, year, and month
+data_df <- data.frame(
+  Value = coredata(thyao_time_series),
+  Year = as.numeric(format(index(thyao_time_series), "%Y")),
+  Month = as.numeric(format(index(thyao_time_series), "%m"))
+)
+
+# Create a list to store control chart plots and outlier timestamps
+control_plots <- list()
+thyao_outlier_timestamps_control <- list()  # Store control chart outlier timestamps
+thyao_outlier_timestamps_boxplot <- list()  # Store boxplot outlier timestamps
+
+# Set the number of rows and columns for the grid
+num_rows <- 2  # Number of rows
+num_cols <- 3  # Number of columns
+
+# Loop through unique year-month combinations
+par(mfrow = c(num_rows, num_cols))  # Adjust rows and columns as needed
+unique_dates <- unique(year_month)
+for (ym in unique_dates) {
+  subset_data <- thyao_time_series[year_month == ym]
+  boxplot(subset_data, main = paste("Boxplot for", ym), ylab = "THYAO Value")
+  cleaned_data <- na.omit(subset_data)
+  mean_value <- mean(cleaned_data)
+  std_dev <- sd(cleaned_data)
+  lower_limit <- mean_value - 3 * std_dev
+  upper_limit <- mean_value + 3 * std_dev
+  subset_df <- fortify.zoo(subset_data)
+  # Sort the data in ascending order
+  sorted_data <- sort(cleaned_data)
+
+  # Calculate the first and the third quartile and the interquartile range (IQR)
+  q1 <- quantile(sorted_data, 0.25)
+  q3 <- quantile(sorted_data, 0.75)
+  iqr_value <- q3 - q1
+  
+  # Identify and store outlier timestamps from the control chart
+  outlier_indices_control <- which(subset_data < lower_limit | subset_data > upper_limit)
+  if (length(outlier_indices_control) > 0) {
+    thyao_outlier_timestamps_control[[ym]] <- unique(index(subset_data)[outlier_indices_control])
+  }
+  
+  # Identify and store outlier timestamps from the boxplot
+  outlier_indices_boxplot <- which(subset_data < q1-1.5*iqr_value | subset_data > q3+1.5*iqr_value)
+  if (length(outlier_indices_boxplot) > 0) {
+    thyao_outlier_timestamps_boxplot[[ym]] <- unique(index(subset_data)[outlier_indices_boxplot])
+  }  
+  
+  # Set custom y-axis limits
+  y_min <- min(c(lower_limit, cleaned_data))
+  y_max <- max(c(upper_limit, cleaned_data))
+  
+  # Create a control chart plot
+  plot <- ggplot(data = subset_df, aes(x = Index, y = subset_data)) +
+    geom_point() +
+    geom_line(y = mean_value, color = "blue") +
+    geom_line(y = lower_limit, color = "red") +
+    geom_line(y = upper_limit, color = "red") +
+    ylim(y_min, y_max) +  # Set custom y-axis limits
+    labs(x = "Timestamp", y = "THYAO Value", title = paste(ym))
+  
+  control_plots[[ym]] <- plot
+}
+
+# Reset the layout to default (1x1) if needed
+par(mfrow = c(1, 1))
+
+plot(thyao_time_series, lty = 1, xlab = "Date", ylab = "Value", main = "THYAO Stock Price")
+
+# Create a boxplot using ggplot2 and facet by year and month
+ggplot(data_df, aes(x = factor(Month), y = Value)) +
+  geom_boxplot() +
+  facet_wrap(~Year, nrow = 1) +
+  labs(x = "Month", y = "Value", title = "Time Series of Boxplots for THYAO Stock")
+
+# Create separate grids for subsets
+num_subsets <- 4  # Number of subsets
+subset_size <- length(unique(year_month)) / num_subsets
+subset_grids <- list()
+
+for (i in 1:num_subsets) {
+  subset_grids[[i]] <- grid.arrange(grobs = control_plots[((i - 1) * subset_size + 1):(i * subset_size)], nrow = num_rows, ncol = num_cols)
+}
+
+print("The outliers of THYAO data detected by control charts:")
+thyao_outlier_timestamps_control
+
+print("The outliers of THYAO data detected by boxplots:")
+thyao_outlier_timestamps_boxplot
+
+```
+
+# Boxplot and 3 Sigma Control Charts for GARAN
+
+```{r}
+garan_time_series <- xts(data$GARAN[indexes], order.by = data$timestamp[indexes])
+
+# Extract the year and month from the timestamps
+year_month <- format(index(garan_time_series), "%Y-%m")
+
+# Create a data frame with the values, year, and month
+data_df <- data.frame(
+  Value = coredata(garan_time_series),
+  Year = as.numeric(format(index(garan_time_series), "%Y")),
+  Month = as.numeric(format(index(garan_time_series), "%m"))
+)
+
+# Create a list to store control chart plots and outlier timestamps
+control_plots <- list()
+garan_outlier_timestamps_control <- list()  # Store control chart outlier timestamps
+garan_outlier_timestamps_boxplot <- list()  # Store boxplot outlier timestamps
+
+# Set the number of rows and columns for the grid
+num_rows <- 2  # Number of rows
+num_cols <- 3  # Number of columns
+
+# Loop through unique year-month combinations
+par(mfrow = c(num_rows, num_cols))  # Adjust rows and columns as needed
+unique_dates <- unique(year_month)
+for (ym in unique_dates) {
+  subset_data <- garan_time_series[year_month == ym]
+  boxplot(subset_data, main = paste("Boxplot for", ym), ylab = "GARAN Value")
+  cleaned_data <- na.omit(subset_data)
+  mean_value <- mean(cleaned_data)
+  std_dev <- sd(cleaned_data)
+  lower_limit <- mean_value - 3 * std_dev
+  upper_limit <- mean_value + 3 * std_dev
+  subset_df <- fortify.zoo(subset_data)
+  # Sort the data in ascending order
+  sorted_data <- sort(cleaned_data)
+
+  # Calculate the first and the third quartile and the interquartile range (IQR)
+  q1 <- quantile(sorted_data, 0.25)
+  q3 <- quantile(sorted_data, 0.75)
+  iqr_value <- q3 - q1
+  
+  # Identify and store outlier timestamps from the control chart
+  outlier_indices_control <- which(subset_data < lower_limit | subset_data > upper_limit)
+  if (length(outlier_indices_control) > 0) {
+    garan_outlier_timestamps_control[[ym]] <- unique(index(subset_data)[outlier_indices_control])
+  }
+  
+  # Identify and store outlier timestamps from the boxplot
+  outlier_indices_boxplot <- which(subset_data < q1-1.5*iqr_value | subset_data > q3+1.5*iqr_value)
+  if (length(outlier_indices_boxplot) > 0) {
+    garan_outlier_timestamps_boxplot[[ym]] <- unique(index(subset_data)[outlier_indices_boxplot])
+  }  
+  
+  # Set custom y-axis limits
+  y_min <- min(c(lower_limit, cleaned_data))
+  y_max <- max(c(upper_limit, cleaned_data))
+  
+  # Create a control chart plot
+  plot <- ggplot(data = subset_df, aes(x = Index, y = subset_data)) +
+    geom_point() +
+    geom_line(y = mean_value, color = "blue") +
+    geom_line(y = lower_limit, color = "red") +
+    geom_line(y = upper_limit, color = "red") +
+    ylim(y_min, y_max) +  # Set custom y-axis limits
+    labs(x = "Timestamp", y = "GARAN Value", title = paste(ym))
+  
+  control_plots[[ym]] <- plot
+}
+
+# Reset the layout to default (1x1) if needed
+par(mfrow = c(1, 1))
+
+plot(garan_time_series, lty = 1, xlab = "Date", ylab = "Value", main = "GARAN Stock Price")
+
+# Create a boxplot using ggplot2 and facet by year and month
+ggplot(data_df, aes(x = factor(Month), y = Value)) +
+  geom_boxplot() +
+  facet_wrap(~Year, nrow = 1) +
+  labs(x = "Month", y = "Value", title = "Time Series of Boxplots for GARAN Stock")
+
+# Create separate grids for subsets
+num_subsets <- 4  # Number of subsets
+subset_size <- length(unique(year_month)) / num_subsets
+subset_grids <- list()
+
+for (i in 1:num_subsets) {
+  subset_grids[[i]] <- grid.arrange(grobs = control_plots[((i - 1) * subset_size + 1):(i * subset_size)], nrow = num_rows, ncol = num_cols)
+}
+
+print("The outliers of GARAN data detected by control charts:")
+garan_outlier_timestamps_control
+
+print("The outliers of GARAN data detected by boxplots:")
+garan_outlier_timestamps_boxplot
+
+```
+
+# Boxplot and 3 Sigma Control Charts for YKBNK
+
+```{r}
+ykbnk_time_series <- xts(data$YKBNK[indexes], order.by = data$timestamp[indexes])
+
+# Extract the year and month from the timestamps
+year_month <- format(index(ykbnk_time_series), "%Y-%m")
+
+# Create a data frame with the values, year, and month
+data_df <- data.frame(
+  Value = coredata(ykbnk_time_series),
+  Year = as.numeric(format(index(ykbnk_time_series), "%Y")),
+  Month = as.numeric(format(index(ykbnk_time_series), "%m"))
+)
+
+# Create a list to store control chart plots and outlier timestamps
+control_plots <- list()
+ykbnk_outlier_timestamps_control <- list()  # Store control chart outlier timestamps
+ykbnk_outlier_timestamps_boxplot <- list()  # Store boxplot outlier timestamps
+
+# Set the number of rows and columns for the grid
+num_rows <- 2  # Number of rows
+num_cols <- 3  # Number of columns
+
+# Loop through unique year-month combinations
+par(mfrow = c(num_rows, num_cols))  # Adjust rows and columns as needed
+unique_dates <- unique(year_month)
+for (ym in unique_dates) {
+  subset_data <- ykbnk_time_series[year_month == ym]
+  boxplot(subset_data, main = paste("Boxplot for", ym), ylab = "YKBNK Value")
+  cleaned_data <- na.omit(subset_data)
+  mean_value <- mean(cleaned_data)
+  std_dev <- sd(cleaned_data)
+  lower_limit <- mean_value - 3 * std_dev
+  upper_limit <- mean_value + 3 * std_dev
+  subset_df <- fortify.zoo(subset_data)
+  # Sort the data in ascending order
+  sorted_data <- sort(cleaned_data)
+
+  # Calculate the first and the third quartile and the interquartile range (IQR)
+  q1 <- quantile(sorted_data, 0.25)
+  q3 <- quantile(sorted_data, 0.75)
+  iqr_value <- q3 - q1
+  
+  # Identify and store outlier timestamps from the control chart
+  outlier_indices_control <- which(subset_data < lower_limit | subset_data > upper_limit)
+  if (length(outlier_indices_control) > 0) {
+    ykbnk_outlier_timestamps_control[[ym]] <- unique(index(subset_data)[outlier_indices_control])
+  }
+  
+  # Identify and store outlier timestamps from the boxplot
+  outlier_indices_boxplot <- which(subset_data < q1-1.5*iqr_value | subset_data > q3+1.5*iqr_value)
+  if (length(outlier_indices_boxplot) > 0) {
+    ykbnk_outlier_timestamps_boxplot[[ym]] <- unique(index(subset_data)[outlier_indices_boxplot])
+  }
+  
+  # Set custom y-axis limits
+  y_min <- min(c(lower_limit, cleaned_data))
+  y_max <- max(c(upper_limit, cleaned_data))
+  
+  # Create a control chart plot
+  plot <- ggplot(data = subset_df, aes(x = Index, y = subset_data)) +
+    geom_point() +
+    geom_line(y = mean_value, color = "blue") +
+    geom_line(y = lower_limit, color = "red") +
+    geom_line(y = upper_limit, color = "red") +
+    ylim(y_min, y_max) +  # Set custom y-axis limits
+    labs(x = "Timestamp", y = "YKBNK Value", title = paste(ym))
+  
+  control_plots[[ym]] <- plot
+}
+
+# Reset the layout to default (1x1) if needed
+par(mfrow = c(1, 1))
+
+plot(ykbnk_time_series, lty = 1, xlab = "Date", ylab = "Value", main = "YKBNK Stock Price")
+
+# Create a boxplot using ggplot2 and facet by year and month
+ggplot(data_df, aes(x = factor(Month), y = Value)) +
+  geom_boxplot() +
+  facet_wrap(~Year, nrow = 1) +
+  labs(x = "Month", y = "Value", title = "Time Series of Boxplots for YKBNK Stock")
+
+# Create separate grids for subsets
+num_subsets <- 4  # Number of subsets
+subset_size <- length(unique(year_month)) / num_subsets
+subset_grids <- list()
+
+for (i in 1:num_subsets) {
+  subset_grids[[i]] <- grid.arrange(grobs = control_plots[((i - 1) * subset_size + 1):(i * subset_size)], nrow = num_rows, ncol = num_cols)
+}
+
+print("The outliers of YKBNK data detected by control charts:")
+ykbnk_outlier_timestamps_control
+
+print("The outliers of YKBNK data detected by boxplots:")
+ykbnk_outlier_timestamps_boxplot
+```
+
+# Boxplot and 3 Sigma Control Charts for TCELL
+
+```{r}
+tcell_time_series <- xts(data$TCELL[indexes], order.by = data$timestamp[indexes])
+
+# Extract the year and month from the timestamps
+year_month <- format(index(tcell_time_series), "%Y-%m")
+
+# Create a data frame with the values, year, and month
+data_df <- data.frame(
+  Value = coredata(tcell_time_series),
+  Year = as.numeric(format(index(tcell_time_series), "%Y")),
+  Month = as.numeric(format(index(tcell_time_series), "%m"))
+)
+
+# Create a list to store control chart plots and outlier timestamps
+control_plots <- list()
+tcell_outlier_timestamps_control <- list()  # Store control chart outlier timestamps
+tcell_outlier_timestamps_boxplot <- list()  # Store boxplot outlier timestamps
+
+# Set the number of rows and columns for the grid
+num_rows <- 2  # Number of rows
+num_cols <- 3  # Number of columns
+
+# Loop through unique year-month combinations
+par(mfrow = c(num_rows, num_cols))  # Adjust rows and columns as needed
+unique_dates <- unique(year_month)
+for (ym in unique_dates) {
+  subset_data <- tcell_time_series[year_month == ym]
+  boxplot(subset_data, main = paste("Boxplot for", ym), ylab = "TCELL Value")
+  cleaned_data <- na.omit(subset_data)
+  mean_value <- mean(cleaned_data)
+  std_dev <- sd(cleaned_data)
+  lower_limit <- mean_value - 3 * std_dev
+  upper_limit <- mean_value + 3 * std_dev
+  subset_df <- fortify.zoo(subset_data)
+  # Sort the data in ascending order
+  sorted_data <- sort(cleaned_data)
+
+  # Calculate the first and the third quartile and the interquartile range (IQR)
+  q1 <- quantile(sorted_data, 0.25)
+  q3 <- quantile(sorted_data, 0.75)
+  iqr_value <- q3 - q1
+  
+  # Identify and store outlier timestamps from the control chart
+  outlier_indices_control <- which(subset_data < lower_limit | subset_data > upper_limit)
+  if (length(outlier_indices_control) > 0) {
+    tcell_outlier_timestamps_control[[ym]] <- unique(index(subset_data)[outlier_indices_control])
+  }
+  
+  # Identify and store outlier timestamps from the boxplot
+  outlier_indices_boxplot <- which(subset_data < q1-1.5*iqr_value | subset_data > q3+1.5*iqr_value)
+  if (length(outlier_indices_boxplot) > 0) {
+    tcell_outlier_timestamps_boxplot[[ym]] <- unique(index(subset_data)[outlier_indices_boxplot])
+  }
+  
+  # Set custom y-axis limits
+  y_min <- min(c(lower_limit, cleaned_data))
+  y_max <- max(c(upper_limit, cleaned_data))
+  
+  # Create a control chart plot
+  plot <- ggplot(data = subset_df, aes(x = Index, y = subset_data)) +
+    geom_point() +
+    geom_line(y = mean_value, color = "blue") +
+    geom_line(y = lower_limit, color = "red") +
+    geom_line(y = upper_limit, color = "red") +
+    ylim(y_min, y_max) +  # Set custom y-axis limits
+    labs(x = "Timestamp", y = "TCELL Value", title = paste(ym))
+  
+  control_plots[[ym]] <- plot
+}
+
+# Reset the layout to default (1x1) if needed
+par(mfrow = c(1, 1))
+
+plot(tcell_time_series, lty = 1, xlab = "Date", ylab = "Value", main = "TCELL Stock Price")
+
+# Create a boxplot using ggplot2 and facet by year and month
+ggplot(data_df, aes(x = factor(Month), y = Value)) +
+  geom_boxplot() +
+  facet_wrap(~Year, nrow = 1) +
+  labs(x = "Month", y = "Value", title = "Time Series of Boxplots for TCELL Stock")
+
+# Create separate grids for subsets
+num_subsets <- 4  # Number of subsets
+subset_size <- length(unique(year_month)) / num_subsets
+subset_grids <- list()
+
+for (i in 1:num_subsets) {
+  subset_grids[[i]] <- grid.arrange(grobs = control_plots[((i - 1) * subset_size + 1):(i * subset_size)], nrow = num_rows, ncol = num_cols)
+}
+
+print("The outliers of TCELL data detected by control charts:")
+tcell_outlier_timestamps_control
+
+print("The outliers of TCELL data detected by boxplots:")
+tcell_outlier_timestamps_boxplot
+
+```
+
+## 4.3. Insights with Open Source Data
+
+# Outlier Months and Google Trend Plots for EREGL
+
+```{r}
+googletrend_path <- "/Users/sudeyilmaz/Desktop/googletrend"
+```
+
+```{r}
+eregl_path <- paste(c(googletrend_path, "eregl"), collapse="/")
+eregl_outlier_months = c("2016-05","2016-08","2016-12","2017-02","2017-03","2017-04","2017-06","2018-01","2018-02")
+eregl_dates_starts = c("2016-05-01","2016-08-01","2016-12-01","2017-02-01", "2017-03-01", "2017-04-01","2017-06-01","2018-01-01", "2018-02-01")
+eregl_dates_ends = c("2016-05-31", "2016-08-31", "2016-12-31", "2017-02-28", "2017-03-31","2017-04-30","2017-06-30", "2018-01-31","2018-02-28")
+eregl_plots_list <- list()
+for (m in 1:length(eregl_outlier_months)){
+  subset_data <- eregl_time_series[eregl_outlier_months[m]]
+  cleaned_data <- na.omit(subset_data)
+  subset_df <- fortify.zoo(subset_data)
+  plot1 <- ggplot(data = subset_df, aes(x = Index, y = subset_data)) +
+    geom_line() +
+    labs(x = "Timestamp", y = "EREGL Stock Value", title = paste("EREGL Time Series", eregl_outlier_months[m]))
+  path <- paste(c(eregl_path, eregl_outlier_months[m]), collapse="/")
+  final_path <- paste(c(path, "csv"), collapse=".")
+  trend_data <- read.csv(final_path, header=TRUE)
+  trend_subset <- as.integer(trend_data$Kategori..Tüm.kategoriler[2:(length(trend_data$Kategori..Tüm.kategoriler))])
+  dates <- seq(as.Date(eregl_dates_starts[m]), as.Date(eregl_dates_ends[m]), by = "day")
+  plot2 <- ggplot() +
+    geom_line(data = data.frame(Date = dates, Value = trend_subset), aes(x = Date, y = Value)) +
+    labs(x = "Date", y = "Google Trend Data for 'eregl'", title = paste("Google Trend Data from", eregl_outlier_months[m]))
+  eregl_plots_list[[m]] <- list(plot1,plot2)
+  
+}
+
+```
+
+```{r}
+grid.arrange(eregl_plots_list[[1]][[1]], eregl_plots_list[[1]][[2]], ncol = 2)
+
+```
+
+### 2016-05:
+
+Outliers for the EREGL stock is mostly around May 9th, even though Google Trend Data is higher than the average around that time, there is not high enough correlation with the data.
+
+```{r}
+grid.arrange(eregl_plots_list[[2]][[1]], eregl_plots_list[[2]][[2]], ncol = 2)
+
+```
+
+### 2016-08: 
+In control chart there is an outlier which is lower than the LCL around 24 August, as it can be seen from the Google trend data around that time, search for "eregl" is very low for a very long time, therefore there could be a correlation between EREGL stock values and Google trend data for "eregl" searches around 2016-08-24.
+
+```{r}
+grid.arrange(eregl_plots_list[[3]][[1]], eregl_plots_list[[3]][[2]], ncol = 2)
+
+```
+
+### 2016-12: 
+In control chart there are outliers ,at the beginning of the month, that are lower than the LCL. Also in Google Trend data, there is no search for "eregl" at beginning of the month, so there could be a correlation.
+
+```{r}
+grid.arrange(eregl_plots_list[[4]][[1]], eregl_plots_list[[4]][[2]], ncol = 2)
+
+```
+
+### 2017-02: 
+In control chart, there are outliers, that are lower than LCL, at February 10th. Accordingly Google Trend data search results are also low around that time.
+
+```{r}
+grid.arrange(eregl_plots_list[[5]][[1]], eregl_plots_list[[5]][[2]], ncol = 2)
+
+```
+
+### 2017-03: 
+In boxplot, there are outliers that are higher than the UCL around March 17th. Even though, in the Google Trend data there are many peaks for the search of "eregl", March 17th is not one of them.
+
+```{r}
+grid.arrange(eregl_plots_list[[6]][[1]], eregl_plots_list[[6]][[2]], ncol = 2)
+
+```
+
+### 2017-04: 
+According to the boxplot, there are outliers at the end of the month, that are higher than the UCL. Correspondingly,Google Trend data shows searches for 'eregl' is high aorund that time.
+
+```{r}
+grid.arrange(eregl_plots_list[[7]][[1]], eregl_plots_list[[7]][[2]], ncol = 2)
+
+```
+
+### 2017-06: 
+According to the boxplot and control chart, there are many outliers at the end of the month, that are higher than the UCL. However,Google Trend data is mostly low at the end of the month, even though there is small increase, there is not enough evidence to correlate those datas.
+
+```{r}
+grid.arrange(eregl_plots_list[[8]][[1]], eregl_plots_list[[8]][[2]], ncol = 2)
+
+```
+
+### 2018-01: 
+In the control chart, there are some outliers at the beginning of the month, that are higher than the UCL. Also, in the boxplot, there are outliers which are both lower than the LCL and higher than the UCL. Upper outliers are around the beginning of the month and similarly there is increase in the search for 'eregl' in the trend data. For the lower outliers which are around January 11th, there is also high correlation with google trend data which shows there is no search for 'eregl' at those times.
+
+```{r}
+grid.arrange(eregl_plots_list[[9]][[1]], eregl_plots_list[[9]][[2]], ncol = 2)
+
+```
+
+### 2018-02: 
+According to the boxplot, there are some outliers at the end of the month, that are higher than the UCL. Accordingly,Google Trend data is very high at the end of the month, which indicates high correlation.
+
+# Outlier Months and Google Trend Plots for KRDMD
+
+```{r}
+krdmd_path <- paste(c(googletrend_path, "krdmd"), collapse="/")
+krdmd_outlier_months = c("2016-06","2016-08","2016-11","2017-03","2017-06","2018-01")
+krdmd_dates_starts = c("2016-06-01","2016-08-01","2016-11-01","2017-03-01", "2017-06-01", "2018-01-01")
+krdmd_dates_ends = c("2016-06-30", "2016-08-31", "2016-11-30", "2017-03-31", "2017-06-30","2018-01-31")
+krdmd_plots_list <- list()
+for (m in 1:length(krdmd_outlier_months)){
+  subset_data <- krdmd_time_series[krdmd_outlier_months[m]]
+  cleaned_data <- na.omit(subset_data)
+  subset_df <- fortify.zoo(subset_data)
+  plot1 <- ggplot(data = subset_df, aes(x = Index, y = subset_data)) +
+    geom_line() +
+    labs(x = "Timestamp", y = "KRDMD Stock Value", title = paste("KRDMD Time Series", krdmd_outlier_months[m]))
+  path <- paste(c(krdmd_path, krdmd_outlier_months[m]), collapse="/")
+  final_path <- paste(c(path, "csv"), collapse=".")
+  trend_data <- read.csv(final_path, header=TRUE)
+  trend_subset <- as.integer(trend_data$Kategori..Tüm.kategoriler[2:(length(trend_data$Kategori..Tüm.kategoriler))])
+  dates <- seq(as.Date(krdmd_dates_starts[m]), as.Date(krdmd_dates_ends[m]), by = "day")
+  plot2 <- ggplot() +
+    geom_line(data = data.frame(Date = dates, Value = trend_subset), aes(x = Date, y = Value)) +
+    labs(x = "Date", y = "Google Trend Data for 'IST:KRDMD'", title = paste("Google Trend Data from", krdmd_outlier_months[m]))
+  krdmd_plots_list[[m]] <- list(plot1,plot2)
+}
+
+```
+
+```{r}
+grid.arrange(krdmd_plots_list[[1]][[1]], krdmd_plots_list[[1]][[2]], ncol = 2)
+
+```
+
+### 2016-06: 
+According to the boxplot, there is a outlier which is lower than LCL, at June 14th. However,Google Trend data shows that there is a very high peak for the search for 'IST:KRDMD' at that time, which indicates no correlation.
+
+```{r}
+grid.arrange(krdmd_plots_list[[2]][[1]], krdmd_plots_list[[2]][[2]], ncol = 2)
+
+```
+
+### 2016-08: 
+According to the boxplot, there is a outlier which is lower than LCL, at August 3rd. Google Trend data shows that searches for 'IST:KRDMD' aroudn that time is not stable and constantly increasing and decreasing. Therefore, there is not a strong correlation.
+
+```{r}
+grid.arrange(krdmd_plots_list[[3]][[1]], krdmd_plots_list[[3]][[2]], ncol = 2)
+
+```
+
+### 2016-11: 
+According to the boxplot, there are many outliers some of which are lower than LCL and somw of which are higher than UCL. Google Trend data shows that at the beginning of the month searches are very high and correlated with the upper outliers. However,there is no evidence for the correlation with lower outliers.
+
+```{r}
+grid.arrange(krdmd_plots_list[[4]][[1]], krdmd_plots_list[[4]][[2]], ncol = 2)
+
+```
+
+### 2017-03: 
+There are outliers higher than UCL at the beginning of the month. Google Trend data shows that at the beginning of the month searches are very high so, there could be a correlation.
+
+```{r}
+grid.arrange(krdmd_plots_list[[5]][[1]], krdmd_plots_list[[5]][[2]], ncol = 2)
+
+```
+
+### 2017-06: 
+There are outliers at the both side of the boxplot. For the upper outliers, Google Trend data also yields high results around that time. Also for the lower outliers, Google trend data is sort of lower than theaverage.
+
+```{r}
+grid.arrange(krdmd_plots_list[[6]][[1]], krdmd_plots_list[[6]][[2]], ncol = 2)
+
+```
+
+### 2018-01: 
+In the control chart, there are outliers that are lower than the LCL at the mid month. Google trend data also indicates that seacrhes for 'IST:KRDMD' is low for that time period.
+
+# Outlier Months and Google Trend Plots for THYAO
+
+```{r}
+thyao_path <- paste(c(googletrend_path, "thyao"), collapse="/")
+thyao_outlier_months = c("2016-08","2016-09","2016-11","2017-02","2017-04","2017-06","2017-07","2018-02")
+thyao_dates_starts = c("2016-08-01","2016-09-01","2016-11-01","2017-02-01", "2017-04-01", "2017-06-01", "2017-07-01", "2018-02-01")
+thyao_dates_ends = c("2016-08-31", "2016-09-30", "2016-11-30", "2017-02-28", "2017-04-30","2017-06-30","2017-07-31","2018-02-28")
+thyao_plots_list <- list()
+for (m in 1:length(thyao_outlier_months)){
+  subset_data <- thyao_time_series[thyao_outlier_months[m]]
+  cleaned_data <- na.omit(subset_data)
+  subset_df <- fortify.zoo(subset_data)
+  plot1 <- ggplot(data = subset_df, aes(x = Index, y = subset_data)) +
+    geom_line() +
+    labs(x = "Timestamp", y = "THYAO Stock Value", title = paste("THYAO Time Series", thyao_outlier_months[m]))
+  path <- paste(c(thyao_path, thyao_outlier_months[m]), collapse="/")
+  final_path <- paste(c(path, "csv"), collapse=".")
+  trend_data <- read.csv(final_path, header=TRUE)
+  trend_subset <- as.integer(trend_data$Kategori..Tüm.kategoriler[2:(length(trend_data$Kategori..Tüm.kategoriler))])
+  dates <- seq(as.Date(thyao_dates_starts[m]), as.Date(thyao_dates_ends[m]), by = "day")
+  plot2 <- ggplot() +
+    geom_line(data = data.frame(Date = dates, Value = trend_subset), aes(x = Date, y = Value)) +
+    labs(x = "Date", y = "Google Trend Data for 'IST:THYAO'", title = paste("Google Trend Data from", thyao_outlier_months[m]))
+  thyao_plots_list[[m]] <- list(plot1,plot2)
+}
+
+```
+
+```{r}
+grid.arrange(thyao_plots_list[[1]][[1]], thyao_plots_list[[1]][[2]], ncol = 2)
+
+```
+
+### 2016-08: 
+In the boxplot, there are outliers at the upper side. Those outliers are around august 9th and Google trend data also showes that searches for 'IST:THYAO' is very high for that time period. Visually, there is a high correlation between Google trend data and THYAO stock values throughout the month.
+
+```{r}
+grid.arrange(thyao_plots_list[[2]][[1]], thyao_plots_list[[2]][[2]], ncol = 2)
+
+```
+
+### 2016-09: 
+Both in the boxplot and control chart, there are many outliers that are higher than UCL at September 23th. Also, Google trend data is increasing around that time.
+
+```{r}
+grid.arrange(thyao_plots_list[[3]][[1]], thyao_plots_list[[3]][[2]], ncol = 2)
+
+```
+
+### 2016-11: 
+Outliers for this month are at the end of the month and are lower than the LCL. However, in the Google trend data, at the end of the month there is a high increase, therefore there is not enough evidence for the correlation.
+
+```{r}
+grid.arrange(thyao_plots_list[[4]][[1]], thyao_plots_list[[4]][[2]], ncol = 2)
+
+```
+
+### 2017-02: 
+There is many outliers that are lower than LCL at the end of the month. Google trend data shows that searches are sort of lower than the average at the end of the month, but there is not strong evidence for the correlation that may cause that drammatic decrease in stock values at the end of the month.
+
+```{r}
+grid.arrange(thyao_plots_list[[5]][[1]], thyao_plots_list[[5]][[2]], ncol = 2)
+
+```
+
+### 2017-04: 
+Outliers in the boxplot are at the upper side. However, there is no strong correlation with the Google trend data since at the end of the month stock values are so high that cause outliers but Google trend data is decreasing drammaticaly at that time.
+
+```{r}
+grid.arrange(thyao_plots_list[[6]][[1]], thyao_plots_list[[6]][[2]], ncol = 2)
+
+```
+
+### 2017-06: 
+Outliers in the boxplot are at the upper side. At the end of the month, both Google trend data and stock values are high which indicates a correlation.
+
+```{r}
+grid.arrange(thyao_plots_list[[7]][[1]], thyao_plots_list[[7]][[2]], ncol = 2)
+
+```
+
+### 2017-07: 
+Outliers in the boxplot are at the lower side for the beginning of the month. Google trend data is also very low for the beginning of the month so there is a correlation.
+
+```{r}
+grid.arrange(thyao_plots_list[[8]][[1]], thyao_plots_list[[8]][[2]], ncol = 2)
+
+```
+
+### 2018-02: 
+At the upper side of the boxplot, there are outliers for the end of the month. Google trend data is strongly uncorrelated with the stock values for this month since there is a decrease for the search of 'IST:THYAO' at the end of the month whereas stock values are very high.
+
+# Outlier Months and Google Trend Plots for GARAN
+
+```{r}
+garan_path <- paste(c(googletrend_path, "garan"), collapse="/")
+garan_outlier_months = c("2016-05","2016-09","2016-11","2016-12","2017-02","2017-03","2017-12","2018-02")
+garan_dates_starts = c("2016-05-01","2016-09-01","2016-11-01","2016-12-01", "2017-02-01", "2017-03-01", "2017-12-01", "2018-02-01")
+garan_dates_ends = c("2016-05-31", "2016-09-30", "2016-11-30", "2016-12-31", "2017-02-28","2017-03-31","2017-12-31","2018-02-28")
+garan_plots_list <- list()
+for (m in 1:length(garan_outlier_months)){
+  subset_data <- garan_time_series[garan_outlier_months[m]]
+  cleaned_data <- na.omit(subset_data)
+  subset_df <- fortify.zoo(subset_data)
+  plot1 <- ggplot(data = subset_df, aes(x = Index, y = subset_data)) +
+    geom_line() +
+    labs(x = "Timestamp", y = "GARAN Stock Value", title = paste("GARAN Time Series", garan_outlier_months[m]))
+  path <- paste(c(garan_path, garan_outlier_months[m]), collapse="/")
+  final_path <- paste(c(path, "csv"), collapse=".")
+  trend_data <- read.csv(final_path, header=TRUE)
+  trend_subset <- as.integer(trend_data$Kategori..Tüm.kategoriler[2:(length(trend_data$Kategori..Tüm.kategoriler))])
+  dates <- seq(as.Date(garan_dates_starts[m]), as.Date(garan_dates_ends[m]), by = "day")
+  plot2 <- ggplot() +
+    geom_line(data = data.frame(Date = dates, Value = trend_subset), aes(x = Date, y = Value)) +
+    labs(x = "Date", y = "Google Trend Data for 'GARAN'", title = paste("Google Trend Data from", garan_outlier_months[m]))
+  garan_plots_list[[m]] <- list(plot1,plot2)
+  
+}
+
+```
+
+```{r}
+grid.arrange(garan_plots_list[[1]][[1]], garan_plots_list[[1]][[2]], ncol = 2)
+
+```
+
+### 2016-05: 
+In the boxplot, there are too many outliers that are at the upper side.Also, in the cotrol chart there are some outliers at the beginning of the month. Even though, Google trend data is somewho high at the beginning of the month, it is not enough to determine a correlation.
+
+```{r}
+grid.arrange(garan_plots_list[[2]][[1]], garan_plots_list[[2]][[2]], ncol = 2)
+
+```
+
+### 2016-09: 
+In the boxplot, there are some outliers that some of which are at the lower side and the other is at upper side. Lower outliers are at the beginning of the month. However, Google trend data is not that low at the beginning of the month to draw a conclusion about the existence of a correlation. Also, for the upper outlier which is at September 22th, Google trend data is again not high enough to show a correlation.
+
+```{r}
+grid.arrange(garan_plots_list[[3]][[1]], garan_plots_list[[3]][[2]], ncol = 2)
+
+```
+
+### 2016-11: 
+Outliers at the beginning of the month shows higher stock values. Accordingly, Google trend data is high for the beginning of the month.
+
+```{r}
+grid.arrange(garan_plots_list[[4]][[1]], garan_plots_list[[4]][[2]], ncol = 2)
+
+```
+
+### 2016-12: 
+Outliers at the beginning of the month shows lower stock values. However, Google trend data yields high results for the beginning of the month, so there is not enough evidence for the correlation.
+
+```{r}
+grid.arrange(garan_plots_list[[5]][[1]], garan_plots_list[[5]][[2]], ncol = 2)
+
+```
+
+### 2017-02: 
+Outliers at the beginning of the month shows lower stock values. In correlation, Google trend data yields very low results for the beginning of the month, so there is strong evidence for the correlation.
+
+```{r}
+grid.arrange(garan_plots_list[[6]][[1]], garan_plots_list[[6]][[2]], ncol = 2)
+
+```
+
+### 2017-03: 
+In the control chart there are outliers that are lower than LCL at the beginning of the month. Accordingly, Google trend data shows similar pattern for the beginning of the month, so there is strong evidence for the correlation.
+
+```{r}
+grid.arrange(garan_plots_list[[7]][[1]], garan_plots_list[[7]][[2]], ncol = 2)
+
+```
+
+### 2017-12: 
+In the boxplot there are outliers at the both side of the boxplot.For the beginning of the month, stock values are lower and causing outliers and at the end of the month stock values are higher and causing outliers. However, for both of the cases Google trend data is not in correlation with those results.
+
+```{r}
+grid.arrange(garan_plots_list[[8]][[1]], garan_plots_list[[8]][[2]], ncol = 2)
+
+```
+
+### 2018-02: 
+At the beginning of the month, outliers are higher than the UCL. Similarly, Google trend data shows an increase for the search of 'GARAN' at the beginning of the month.
+
+# Outlier Months and Google Trend Plots for YKBNK
+
+```{r}
+ykbnk_path <- paste(c(googletrend_path, "ykbnk"), collapse="/")
+ykbnk_outlier_months = c("2016-03","2016-05","2016-09","2016-11","2016-12","2017-01","2017-08","2017-10","2017-12")
+ykbnk_dates_starts = c("2016-03-01","2016-05-01","2016-09-01","2016-11-01", "2016-12-01", "2017-01-01", "2017-08-01", "2017-10-01", "2017-12-01")
+ykbnk_dates_ends = c("2016-03-31", "2016-05-31", "2016-09-30", "2016-11-30", "2016-12-31","2017-01-31","2017-08-31","2017-10-31", "2017-12-31")
+ykbnk_plots_list <- list()
+for (m in 1:length(ykbnk_outlier_months)){
+  subset_data <- ykbnk_time_series[ykbnk_outlier_months[m]]
+  cleaned_data <- na.omit(subset_data)
+  subset_df <- fortify.zoo(subset_data)
+  plot1 <- ggplot(data = subset_df, aes(x = Index, y = subset_data)) +
+    geom_line() +
+    labs(x = "Timestamp", y = "YKBNK Stock Value", title = paste("YKBNK Time Series", ykbnk_outlier_months[m]))
+  path <- paste(c(ykbnk_path, ykbnk_outlier_months[m]), collapse="/")
+  final_path <- paste(c(path, "csv"), collapse=".")
+  trend_data <- read.csv(final_path, header=TRUE)
+  trend_subset <- as.integer(trend_data$Kategori..Tüm.kategoriler[2:(length(trend_data$Kategori..Tüm.kategoriler))])
+  dates <- seq(as.Date(ykbnk_dates_starts[m]), as.Date(ykbnk_dates_ends[m]), by = "day")
+  plot2 <- ggplot() +
+    geom_line(data = data.frame(Date = dates, Value = trend_subset), aes(x = Date, y = Value)) +
+    labs(x = "Date", y = "Google Trend Data for 'IST:YKBNK'", title = paste("Google Trend Data from", ykbnk_outlier_months[m]))
+  ykbnk_plots_list[[m]] <- list(plot1,plot2)
+  
+}
+
+```
+
+```{r}
+grid.arrange(ykbnk_plots_list[[1]][[1]], ykbnk_plots_list[[1]][[2]], ncol = 2)
+
+```
+
+### 2016-03: 
+Both in the boxplot and control chart, there are outlierso that are higher than the UCL at the end of the month. However, Google trend data is strictly zero for the the end of the month.
+
+```{r}
+grid.arrange(ykbnk_plots_list[[2]][[1]], ykbnk_plots_list[[2]][[2]], ncol = 2)
+
+```
+
+### 2016-05: 
+Boxplot yields outliers for the both sides. However, for all the extreme points of the stock values, Google trend data is at the opposite direction. When the stock values are high, trend is at low point and visa versa. Therefore, there is not enough evidence for the correlation.
+
+```{r}
+grid.arrange(ykbnk_plots_list[[3]][[1]], ykbnk_plots_list[[3]][[2]], ncol = 2)
+
+```
+
+### 2016-09: 
+Boxplot yields outliers for the upper side. However, when the stock values are high and cause outliers at September 22th, Google trend data is very low and not showing a correlation.
+
+```{r}
+grid.arrange(ykbnk_plots_list[[4]][[1]], ykbnk_plots_list[[4]][[2]], ncol = 2)
+
+```
+
+### 2016-11: 
+Boxplot yields outliers for the both sides. Control charts shows the outliers that are higher than the UCL at the beginning of the month. even though, at the beginning of the month Google trend data is relatively high, it is not enough to draw a strong conclusion about the correlation.
+
+```{r}
+grid.arrange(ykbnk_plots_list[[5]][[1]], ykbnk_plots_list[[5]][[2]], ncol = 2)
+
+```
+
+### 2016-12: 
+For the middle of the month both stock values and Google trend data yields high resulting indicating a correlation.
+
+```{r}
+grid.arrange(ykbnk_plots_list[[6]][[1]], ykbnk_plots_list[[6]][[2]], ncol = 2)
+
+```
+
+### 2017-01: 
+At the end of the month stock values are high and casuing outliers. However, Google trend data is not high enough at the end of the month to indicate a correlation.
+
+```{r}
+grid.arrange(ykbnk_plots_list[[7]][[1]], ykbnk_plots_list[[7]][[2]], ncol = 2)
+
+```
+
+### 2017-08: 
+At the end of the month stock values are high and casuing outliers. Similary, Google trend data is very high at the end of the month indicating a correlation.
+
+```{r}
+grid.arrange(ykbnk_plots_list[[8]][[1]], ykbnk_plots_list[[8]][[2]], ncol = 2)
+
+```
+
+### 2017-10: 
+Boxplot shows outliers for the both sides. At October 9th stock values are very low and casuing outliers. Similary, Google trend data is zero for a very long time around October 9th.
+
+```{r}
+grid.arrange(ykbnk_plots_list[[9]][[1]], ykbnk_plots_list[[9]][[2]], ncol = 2)
+
+```
+
+### 2017-12: 
+Boxplot shows outliers for the both sides. At the beginning of the month stock values are very low, but Google trend data is oppsiongly high.
+
+# Outlier Months and Google Trend Plots for TCELL
+
+```{r}
+tcell_path <- paste(c(googletrend_path, "tcell"), collapse="/")
+tcell_outlier_months = c("2016-03","2016-05","2016-07","2016-11","2017-03","2017-05","2017-07","2017-11","2018-02")
+tcell_dates_starts = c("2016-03-01","2016-05-01","2016-07-01","2016-11-01", "2017-03-01", "2017-05-01", "2017-07-01", "2017-11-01", "2018-02-01")
+tcell_dates_ends = c("2016-03-31", "2016-05-31", "2016-07-31", "2016-11-30", "2017-03-31","2017-05-31","2017-08-31","2017-11-30", "2018-02-28")
+tcell_plots_list <- list()
+for (m in 1:length(tcell_outlier_months)){
+  subset_data <- tcell_time_series[tcell_outlier_months[m]]
+  cleaned_data <- na.omit(subset_data)
+  subset_df <- fortify.zoo(subset_data)
+  plot1 <- ggplot(data = subset_df, aes(x = Index, y = subset_data)) +
+    geom_line() +
+    labs(x = "Timestamp", y = "TCELL Stock Value", title = paste("TCELL Time Series", tcell_outlier_months[m]))
+  path <- paste(c(tcell_path, tcell_outlier_months[m]), collapse="/")
+  final_path <- paste(c(path, "csv"), collapse=".")
+  trend_data <- read.csv(final_path, header=TRUE)
+  trend_subset <- as.integer(trend_data$Kategori..Tüm.kategoriler[2:(length(trend_data$Kategori..Tüm.kategoriler))])
+  dates <- seq(as.Date(tcell_dates_starts[m]), as.Date(tcell_dates_ends[m]), by = "day")
+  plot2 <- ggplot() +
+    geom_line(data = data.frame(Date = dates, Value = trend_subset), aes(x = Date, y = Value)) +
+    labs(x = "Date", y = "Google Trend Data for 'IST:TCELL'", title = paste("Google Trend Data from", tcell_outlier_months[m]))
+  tcell_plots_list[[m]] <- list(plot1,plot2)
+  
+}
+
+```
+
+```{r}
+grid.arrange(tcell_plots_list[[1]][[1]], tcell_plots_list[[1]][[2]], ncol = 2)
+
+```
+
+### 2016-03: 
+Around March 18th to 22th, stock values are high and causing outliers. Similary, at the Google trend data search for 'IST:TCELL' is high for that period indicating a correlation.
+
+```{r}
+grid.arrange(tcell_plots_list[[2]][[1]], tcell_plots_list[[2]][[2]], ncol = 2)
+
+```
+
+### 2016-05: 
+At the beginning of the month, stock values are high and causing outliers. However, at the Google trend data is zero for that period and failing to indicate a correlation.
+
+```{r}
+grid.arrange(tcell_plots_list[[3]][[1]], tcell_plots_list[[3]][[2]], ncol = 2)
+
+```
+
+### 2016-07: 
+Around June 14th to 18th, stock values are high and causing outliers. Somehow similiarly, Google trend data is also high for July 18th and indicating a correlation.
+
+```{r}
+grid.arrange(tcell_plots_list[[4]][[1]], tcell_plots_list[[4]][[2]], ncol = 2)
+
+```
+
+### 2016-11: 
+At the end of the month, stock values are very low and accordingly, Google trend data is also zero for that period indicating a correlation.
+
+```{r}
+grid.arrange(tcell_plots_list[[5]][[1]], tcell_plots_list[[5]][[2]], ncol = 2)
+
+```
+
+### 2017-03: 
+For March 13th there is an outlier that is lower than the LCL, however Google trend data is not low enough to indicate a correlation with the stock value.
+
+```{r}
+grid.arrange(tcell_plots_list[[6]][[1]], tcell_plots_list[[6]][[2]], ncol = 2)
+
+```
+
+### 2017-05: 
+At the beginning of the month outliers and Google trend data is in correlation in terms of both being high.
+
+```{r}
+grid.arrange(tcell_plots_list[[7]][[1]], tcell_plots_list[[7]][[2]], ncol = 2)
+
+```
+
+### 2017-07: 
+At the beginning of the month there are outliers that are lower than the LCL and at the end of the month there are outliers higher than the UCL. However, Google trend data is not in correlation with both of these results.
+
+```{r}
+grid.arrange(tcell_plots_list[[8]][[1]], tcell_plots_list[[8]][[2]], ncol = 2)
+
+```
+
+### 2017-11: 
+At the beginning of the month there are outliers that are higher than the UCL and accordingly, Google trend data is high for that period.
+
+```{r}
+grid.arrange(tcell_plots_list[[9]][[1]], tcell_plots_list[[9]][[2]], ncol = 2)
+
+```
+
+### 2018-02: 
+At February 20th there is an outlier that is lower than the LCL, however Google trend data is not yielding a result that shows correlation for that time.
+
+## Appendix
+
+During the preparation period of this report, Large Language Model chatGPT has been utilized.
+
+The prompt and resulting response of the model can be seen via the link below:
+
+<https://chat.openai.com/share/6991dd52-49f0-4d8e-9f1c-f88d5a2b9d29>
