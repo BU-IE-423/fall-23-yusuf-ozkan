@@ -10,4 +10,7 @@ This is [link to my repository on GitHub](https://https://github.com/BU-IE-423/f
 
 * [Stock Analysis](IE423_Project_Part1_final.html): Statistical Process Analysis for 6 different stock data
 
+### Project Part 2
+
+* [Pairs Trading](IE423 Project Part2_final_.html): Analysis of BIST30 stock indices
 
