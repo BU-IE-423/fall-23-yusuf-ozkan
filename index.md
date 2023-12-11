@@ -12,5 +12,5 @@ This is [link to my repository on GitHub](https://https://github.com/BU-IE-423/f
 
 ### Project Part 2
 
-* [Pairs Trading](IE423 Project Part2_final_.html): Analysis of BIST30 stock indices
+* [Pairs Trading](IE 423 Project Part 2_final_.html): Analysis of BIST30 stock indices
 
