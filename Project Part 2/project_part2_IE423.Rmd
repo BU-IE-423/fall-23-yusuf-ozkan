@@ -1,0 +1,1326 @@
+---
+title: "IE 423 Project Part 2"
+output:
+  html_document:
+    df_print: paged
+---
+
+### link to the repository of Sude YILMAZ:
+
+<https://github.com/BU-IE-423/fall-23-sudeyilmaz/tree/main>
+
+### link to the repository of Yusufcan ÖZKAN:
+
+<https://github.com/BU-IE-423/fall-23-yusuf-ozkan/tree/main>
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning=FALSE, message = FALSE)
+```
+
+```{r}
+#Loading required packages
+library(zoo)
+library(xts)
+library(ggplot2)
+library(gridExtra)
+library(tidyr)
+library(quantmod)
+library(lmtest)
+library(dplyr)
+library(gtools)
+library(forecast)
+library(stats)
+
+# Data files for 2021
+data_2021Q1 <- read.csv("/Users/sudeyilmaz/Desktop/IE\ 423/20180101_20231121_bist30/20201228_20210328_bist30.csv", header = TRUE)
+data_2021Q2 <- read.csv("/Users/sudeyilmaz/Desktop/IE\ 423/20180101_20231121_bist30/20210329_20210627_bist30.csv", header = TRUE)
+data_2021Q3 <- read.csv("/Users/sudeyilmaz/Desktop/IE\ 423/20180101_20231121_bist30/20210628_20210926_bist30.csv", header = TRUE)
+data_2021Q4 <- read.csv("/Users/sudeyilmaz/Desktop/IE\ 423/20180101_20231121_bist30/20210927_20211226_bist30.csv", header = TRUE)
+
+# Combine quarterly data into one data frame
+data_combined <- bind_rows(data_2021Q1, data_2021Q2, data_2021Q3, data_2021Q4)
+
+# Use pivot_wider to convert from long to wide format
+wide_data21 <- data_combined %>%
+  pivot_wider(names_from = short_name, values_from = price)
+
+wide_data21$timestamp <- as.POSIXct(wide_data21$timestamp)
+
+
+
+```
+
+## Determining highly correlated stock pairs using 2021 data
+
+```{r}
+##### To determine highly correlated pairs
+col_names <- colnames(wide_data21)
+stock_names <- col_names[-1]
+# Generate all combinations
+all_combinations <- combinations(n = length(stock_names), r = 2, v = stock_names)
+# Create a data frame to store correlation information
+correlation_data <- data.frame(
+  Pair = character(),
+  Correlation = numeric(),
+  stringsAsFactors = FALSE
+)
+
+# Loop over combinations
+for (i in seq_len(nrow(all_combinations))) {
+  first_stock <- all_combinations[i, 1]
+  second_stock <- all_combinations[i, 2]
+  
+  # Extract columns from wide_data21
+  stock1_data <- wide_data21[, first_stock]
+  stock2_data <- wide_data21[, second_stock]
+  
+  filled_data_indexes <- is.na(stock1_data) + is.na(stock2_data)
+  filled_data_indexes <- filled_data_indexes==0
+  
+  correlation <- cor(stock1_data[filled_data_indexes], stock2_data[filled_data_indexes])
+  correlation_data <- rbind(correlation_data, data.frame(Pair = paste(first_stock, second_stock, sep = "-"), Correlation = correlation))
+}
+
+# Sort the data frame by absolute correlation in descending order
+correlation_data <- correlation_data[order(-abs(correlation_data$Correlation)), ]
+
+correlation_data
+
+```
+
+### The first 2 pairs with highest correlations that does not have common stocks are selected:
+
+```{r}
+
+#Selected pairs:
+first_pair <- c("AKBNK","ISCTR")
+second_pair <- c("SAHOL", "TTKOM") 
+```
+
+## Time Series Plot for First Pair: AKBNK & ISCTR
+
+```{r}
+# Plot the first_pair time series
+combined_ts1 <- cbind(xts(wide_data21$AKBNK, order.by = wide_data21$timestamp), xts(wide_data21$ISCTR, order.by = wide_data21$timestamp))
+plot(combined_ts1, col = c("blue", "red"), lty = 1, main = "Stock Prices Over Time for AKBNK and ISCTR",
+     ylab = "Price", xlab = "Time")
+```
+
+## Time Series Plot for Second Pair: SAHOL & TTKOM
+
+```{r}
+# Plot the first_pair time series
+combined_ts1 <- cbind(xts(wide_data21$SAHOL, order.by = wide_data21$timestamp), xts(wide_data21$TTKOM, order.by = wide_data21$timestamp))
+plot(combined_ts1, col = c("blue", "red"), lty = 1, main = "Stock Prices Over Time for SAHOL and TTKOM",
+     ylab = "Price", xlab = "Time")
+```
+
+# Training the Model in 2022 and Deciding Profit Optimizing Coefficients
+
+
+```{r}
+data_2022Q1 <- read.csv("/Users/sudeyilmaz/Desktop/IE\ 423/20180101_20231121_bist30/20211227_20220327_bist30.csv", header = TRUE)
+data_2022Q2 <- read.csv("/Users/sudeyilmaz/Desktop/IE\ 423/20180101_20231121_bist30/20220328_20220626_bist30.csv", header = TRUE)
+data_2022Q3 <- read.csv("/Users/sudeyilmaz/Desktop/IE\ 423/20180101_20231121_bist30/20220627_20220925_bist30.csv", header = TRUE)
+data_2022Q4 <- read.csv("/Users/sudeyilmaz/Desktop/IE\ 423/20180101_20231121_bist30/20220926_20221225_bist30.csv", header = TRUE)
+
+# Combine quarterly data into one data frame
+data_combined22 <- bind_rows(data_2022Q1, data_2022Q2, data_2022Q3, data_2022Q4)
+
+# Use pivot_wider to convert from long to wide format
+wide_data22 <- data_combined %>%
+  pivot_wider(names_from = short_name, values_from = price)
+
+wide_data22$timestamp <- as.POSIXct(wide_data22$timestamp)
+```
+
+## Training Linear Regression for AKBNK and ISCTR(2022):
+
+After making some trial and errors on the "k" for UCL_open, LCL_open, UCL_terminate, LCL_terminate k-sigma limits, it is decided that 3-sigma for UCL_open and LCL_open, 2-sigma for UCL_terminate and LCL_terminate is the optimizing decisions.
+
+```{r}
+# Assuming AKBNK and ISCTR are your two lists of length 2506
+
+# Set the window size for the rolling regression
+window_size <- 100
+
+control_chart_sample_size <- 100
+
+# Initialize an empty vector to store residuals
+residuals_vector <- numeric(length(wide_data22$AKBNK))
+
+Short_Position_Opened = FALSE
+
+Long_Position_Opened = FALSE
+
+Price_Taken = FALSE
+
+Profits <- numeric(length(wide_data22$AKBNK))
+
+rolling_control_limits <- numeric(length(wide_data22$AKBNK))
+
+
+# Perform the rolling regression and calculate residuals
+for (i in (window_size + 1):length(wide_data22$AKBNK)) {
+  # Extract the current window of data
+  akbnk_window <- wide_data22$AKBNK[(i - window_size):(i - 1)]
+  isctr_window <- wide_data22$ISCTR[(i - window_size):(i - 1)]
+  
+  # Fit a linear regression model
+  lm_model <- lm(akbnk_window ~ isctr_window)
+  
+  # Make predictions
+  prediction <- predict(lm_model, newdata = list(isctr_window = wide_data22$ISCTR[i]))
+  
+  residual <- wide_data22$AKBNK[i] - prediction
+  
+  # Calculate residuals
+  residuals_vector[i] <- residual
+  
+  if (i > window_size + control_chart_sample_size) {
+    
+    
+    sigma <- sd(residuals_vector[(i - control_chart_sample_size):(i - 1)])
+    
+    # Control limits and center lines
+    CL = 0
+    UCL_open = 3*sigma
+    LCL_open = -3*sigma
+    rolling_control_limits[i] <- LCL_open
+    
+
+    # Signal for terminate position
+
+    UCL_terminate = 3*sigma
+    LCL_terminate = -3*sigma
+    
+    if (Short_Position_Opened == FALSE) {
+      if (residual > UCL_open) {
+        Short_Position_Opened <- TRUE
+        Price_Taken <- FALSE
+      }
+    }
+    
+    if (Long_Position_Opened == FALSE) {
+      if (residual < LCL_open) {
+        Long_Position_Opened <- TRUE
+        Price_Taken <- FALSE
+      }
+    }
+    
+    if (Short_Position_Opened == TRUE) {
+      if (Price_Taken == FALSE){
+        akbnk_price <- wide_data22$AKBNK[i]
+        isctr_price <- wide_data22$ISCTR[i]
+        Price_Taken <- TRUE
+      }
+      if (residual < UCL_terminate) {
+        Short_Position_Opened <- FALSE
+        if (i < length(wide_data22$AKBNK)) {
+          profit <- - ( (wide_data22$AKBNK[i+1])/akbnk_price ) + ( (wide_data22$ISCTR[i+1])/isctr_price )
+          Profits[i+1] <- profit
+        }
+      }
+    }
+    
+    if (Long_Position_Opened == TRUE) {
+      if (Price_Taken == FALSE){
+        akbnk_price <- wide_data22$AKBNK[i]
+        isctr_price <- wide_data22$ISCTR[i]
+        Price_Taken <- TRUE
+      }
+      if (residual > LCL_terminate) {
+        Long_Position_Opened <- FALSE
+        if (i < length(wide_data22$AKBNK)) {
+          profit <- ( (wide_data22$AKBNK[i+1])/akbnk_price ) - ( (wide_data22$ISCTR[i+1])/isctr_price )
+          Profits[i+1] <- profit
+        }
+      }
+    }   
+   
+     
+  }
+  
+
+}
+
+# Plot residuals and control limits
+residuals_vector_ts <- xts(residuals_vector, order.by = wide_data22$timestamp)
+upper_control_limits_ts <- xts(-rolling_control_limits, order.by = wide_data22$timestamp)
+lower_control_limits_ts <- xts(rolling_control_limits, order.by = wide_data22$timestamp)
+
+residual_and_control_limits <- cbind(upper_control_limits_ts, residuals_vector_ts, lower_control_limits_ts)
+
+
+# Plot residuals and control limits
+plot(residual_and_control_limits, col = c("red", "blue", "red"), lty = 1, main = "Residuals of Regression Model of AKBNK and ISCTR 2022",
+     ylab = "Residual", xlab = "Time")
+legend("topright", legend = c("Upper Control Limits", "Residuals", "Lower Control Limits"),
+       col = c("red", "blue", "red"), lty = 1, cex = 0.8)
+
+# Plot profits
+profit_ts <- xts(Profits, order.by = wide_data22$timestamp)
+plot(profit_ts, lty = 1, main = "Profits made after the termination of each position",
+     ylab = "Profit", xlab = "Time")
+
+print(paste("Total Profit =", sum(Profits)))
+
+
+```
+
+## Training Linear Regression for SAHOL and TTKOM(2022):
+
+After making some trial and errors on the "k" for UCL_open, LCL_open, UCL_terminate, LCL_terminate k-sigma limits, it is decided that 2-sigma for UCL_open and LCL_open, 1-sigma for UCL_terminate and LCL_terminate is the optimizing decisions.
+
+```{r}
+# Assuming SAHOL and TTKOM are your two lists of length 2506
+
+# Set the window size for the rolling regression
+window_size <- 100
+
+control_chart_sample_size <- 100
+
+# Initialize an empty vector to store residuals
+residuals_vector <- numeric(length(wide_data22$SAHOL))
+
+Short_Position_Opened = FALSE
+
+Long_Position_Opened = FALSE
+
+Price_Taken = FALSE
+
+Profits <- numeric(length(wide_data22$SAHOL))
+
+rolling_control_limits <- numeric(length(wide_data22$SAHOL))
+
+
+# Perform the rolling regression and calculate residuals
+for (i in (window_size + 1):length(wide_data22$SAHOL)) {
+  # Extract the current window of data
+  sahol_window <- wide_data22$SAHOL[(i - window_size):(i - 1)]
+  ttkom_window <- wide_data22$TTKOM[(i - window_size):(i - 1)]
+  
+  # Fit a linear regression model
+  lm_model <- lm(sahol_window ~ ttkom_window)
+  
+  # Make predictions
+  prediction <- predict(lm_model, newdata = list(ttkom_window = wide_data22$TTKOM[i]))
+  
+  residual <- wide_data22$SAHOL[i] - prediction
+  
+  # Calculate residuals
+  residuals_vector[i] <- residual
+  
+  if (i > window_size + control_chart_sample_size) {
+    
+    
+    sigma <- sd(residuals_vector[(i - control_chart_sample_size):(i - 1)])
+    
+    # Control limits and center lines
+    CL = 0
+    UCL_open = 2*sigma
+    LCL_open = -2*sigma
+    rolling_control_limits[i] <- LCL_open
+    
+
+    # Signal for terminate position
+
+    UCL_terminate = 1*sigma
+    LCL_terminate = -1*sigma
+    
+    if (Short_Position_Opened == FALSE) {
+      if (residual > UCL_open) {
+        Short_Position_Opened <- TRUE
+        Price_Taken <- FALSE
+      }
+    }
+    
+    if (Long_Position_Opened == FALSE) {
+      if (residual < LCL_open) {
+        Long_Position_Opened <- TRUE
+        Price_Taken <- FALSE
+      }
+    }
+    
+    if (Short_Position_Opened == TRUE) {
+      if (Price_Taken == FALSE){
+        sahol_price <- wide_data22$SAHOL[i]
+        ttkom_price <- wide_data22$TTKOM[i]
+        Price_Taken <- TRUE
+      }
+      if (residual < UCL_terminate) {
+        Short_Position_Opened <- FALSE
+        if (i < length(wide_data22$SAHOL)) {
+          profit <- - ( (wide_data22$SAHOL[i+1])/sahol_price ) + ( (wide_data22$TTKOM[i+1])/ttkom_price )
+          Profits[i+1] <- profit
+        }
+      }
+    }
+    
+    if (Long_Position_Opened == TRUE) {
+      if (Price_Taken == FALSE){
+        sahol_price <- wide_data22$SAHOL[i]
+        ttkom_price <- wide_data22$TTKOM[i]
+        Price_Taken <- TRUE
+      }
+      if (residual > LCL_terminate) {
+        Long_Position_Opened <- FALSE
+        if (i < length(wide_data22$SAHOL)) {
+          profit <- ( (wide_data22$SAHOL[i+1])/sahol_price ) - ( (wide_data22$TTKOM[i+1])/ttkom_price )
+          Profits[i+1] <- profit
+        }
+      }
+    }   
+   
+     
+  }
+  
+
+}
+
+# Plot residuals and control limits
+residuals_vector_ts <- xts(residuals_vector, order.by = wide_data22$timestamp)
+upper_control_limits_ts <- xts(-rolling_control_limits, order.by = wide_data22$timestamp)
+lower_control_limits_ts <- xts(rolling_control_limits, order.by = wide_data22$timestamp)
+
+residual_and_control_limits <- cbind(upper_control_limits_ts, residuals_vector_ts, lower_control_limits_ts)
+
+
+# Plot residuals and control limits
+plot(residual_and_control_limits, col = c("red", "blue", "red"), lty = 1, main = "Residuals of Regression Model of SAHOL and TTKOM 2022",
+     ylab = "Residual", xlab = "Time")
+legend("topright", legend = c("Upper Control Limits", "Residuals", "Lower Control Limits"),
+       col = c("red", "blue", "red"), lty = 1, cex = 0.8)
+
+# Plot profits
+profit_ts <- xts(Profits, order.by = wide_data22$timestamp)
+plot(profit_ts, lty = 1, main = "Profits made after the termination of each position",
+     ylab = "Profit", xlab = "Time")
+
+print(paste("Total Profit =", sum(Profits)))
+
+```
+
+## Training ARIMAX for AKBNK and ISCTR(2022):
+
+After making some trial and errors on the "k" for UCL_open, LCL_open, UCL_terminate, LCL_terminate k-sigma limits, it is decided that 3-sigma for UCL_open and LCL_open, 1-sigma for UCL_terminate and LCL_terminate is the optimizing decisions.
+
+```{r}
+# Assuming AKBNK and ISCTR are your two lists of length 2506
+
+# Set the window size for the rolling regression
+window_size <- 100
+
+control_chart_sample_size <- 100
+
+# Initialize an empty vector to store residuals
+residuals_vector <- numeric(length(wide_data22$AKBNK))
+
+Short_Position_Opened = FALSE
+
+Long_Position_Opened = FALSE
+
+Price_Taken = FALSE
+
+Profits <- numeric(length(wide_data22$AKBNK))
+
+rolling_control_limits <- numeric(length(wide_data22$AKBNK))
+
+# Perform the rolling regression and calculate residuals
+for (i in (window_size + 1):length(wide_data22$AKBNK)) {
+  # Extract the current window of data
+  akbnk_window <- wide_data22$AKBNK[(i - window_size):(i - 1)]
+  isctr_window <- wide_data22$ISCTR[(i - window_size):(i - 1)]
+
+  # Fit an ARIMAX model to AKBNK with ISCTR as regressor
+  arimax_model <- auto.arima(akbnk_window, xreg = isctr_window)
+  
+  
+  # Make predictions
+  prediction <- predict(arimax_model, newxreg = wide_data22$ISCTR[i])
+  
+  # Calculate residuals
+  residual <- as.numeric(wide_data22$AKBNK[i]) - as.numeric(prediction$pred[1])
+  
+  # Calculate residuals
+  residuals_vector[i] <- residual
+  
+  if (i > window_size + control_chart_sample_size) {
+    
+    sigma <- sd(residuals_vector[(i - control_chart_sample_size):(i - 1)])
+    
+    # Control limits and center lines
+    CL = 0
+    UCL_open = 3*sigma
+    LCL_open = -3*sigma
+    rolling_control_limits[i] <- LCL_open
+    
+
+    # Signal for terminate position
+
+    UCL_terminate = 1*sigma
+    LCL_terminate = -1*sigma
+    
+    if (Short_Position_Opened == FALSE) {
+      if (residual > UCL_open) {
+        Short_Position_Opened <- TRUE
+        Price_Taken <- FALSE
+      }
+    }
+    
+    if (Long_Position_Opened == FALSE) {
+      if (residual < LCL_open) {
+        Long_Position_Opened <- TRUE
+        Price_Taken <- FALSE
+      }
+    }
+    
+    if (Short_Position_Opened == TRUE) {
+      if (Price_Taken == FALSE){
+        akbnk_price <- wide_data22$AKBNK[i]
+        isctr_price <- wide_data22$ISCTR[i]
+        Price_Taken <- TRUE
+      }
+      if (residual < UCL_terminate) {
+        Short_Position_Opened <- FALSE
+        if (i < length(wide_data22$AKBNK)) {
+          profit <- - ( (wide_data22$AKBNK[i+1])/akbnk_price ) + ( (wide_data22$ISCTR[i+1])/isctr_price )
+          Profits[i+1] <- profit
+        }
+      }
+    }
+    
+    if (Long_Position_Opened == TRUE) {
+      if (Price_Taken == FALSE){
+        akbnk_price <- wide_data22$AKBNK[i]
+        isctr_price <- wide_data22$ISCTR[i]
+        Price_Taken <- TRUE
+      }
+      if (residual > LCL_terminate) {
+        Long_Position_Opened <- FALSE
+        if (i < length(wide_data22$AKBNK)) {
+          profit <- ( (wide_data22$AKBNK[i+1])/akbnk_price ) - ( (wide_data22$ISCTR[i+1])/isctr_price )
+          Profits[i+1] <- profit
+        }
+      }
+    }   
+   
+     
+  }
+  
+
+}
+
+# Plot residuals and control limits
+residuals_vector_ts <- xts(residuals_vector, order.by = wide_data22$timestamp)
+upper_control_limits_ts <- xts(-rolling_control_limits, order.by = wide_data22$timestamp)
+lower_control_limits_ts <- xts(rolling_control_limits, order.by = wide_data22$timestamp)
+
+residual_and_control_limits <- cbind(upper_control_limits_ts, residuals_vector_ts, lower_control_limits_ts)
+
+
+# Plot residuals and control limits
+plot(residual_and_control_limits, col = c("red", "blue", "red"), lty = 1, main = "Residuals of ARIMAX Model of AKBNK and ISCTR 2022",
+     ylab = "Residual", xlab = "Time")
+legend("topright", legend = c("Upper Control Limits", "Residuals", "Lower Control Limits"),
+       col = c("red", "blue", "red"), lty = 1, cex = 0.8)
+
+# Plot profits
+profit_ts <- xts(Profits, order.by = wide_data22$timestamp)
+plot(profit_ts, lty = 1, main = "Profits made after the termination of each position",
+     ylab = "Profit", xlab = "Time")
+
+print(paste("Total Profit =", sum(Profits)))
+
+```
+
+## Training ARIMAX for SAHOL and TTKOM(2022):
+
+After making some trial and errors on the "k" for UCL_open, LCL_open, UCL_terminate, LCL_terminate k-sigma limits, it is decided that 3-sigma for UCL_open and LCL_open, 2-sigma for UCL_terminate and LCL_terminate is the optimizing decisions.
+
+```{r}
+# Assuming SAHOL and TTKOM are your two lists of length 2506
+
+# Set the window size for the rolling regression
+window_size <- 100
+
+control_chart_sample_size <- 100
+
+# Initialize an empty vector to store residuals
+residuals_vector <- numeric(length(wide_data22$SAHOL))
+
+Short_Position_Opened = FALSE
+
+Long_Position_Opened = FALSE
+
+Price_Taken = FALSE
+
+Profits <- numeric(length(wide_data22$SAHOL))
+
+rolling_control_limits <- numeric(length(wide_data22$SAHOL))
+
+# Perform the rolling regression and calculate residuals
+for (i in (window_size + 1):length(wide_data22$SAHOL)) {
+  # Extract the current window of data
+  sahol_window <- wide_data22$SAHOL[(i - window_size):(i - 1)]
+  ttkom_window <- wide_data22$TTKOM[(i - window_size):(i - 1)]
+
+  # Fit an ARIMAX model to SAHOL with TTKOM as regressor
+  arimax_model <- auto.arima(sahol_window, xreg = ttkom_window)
+  
+  # Make predictions
+  prediction <- predict(arimax_model, newxreg = wide_data22$TTKOM[i])
+  
+  # Calculate residuals
+  residual <- as.numeric(wide_data22$SAHOL[i]) - as.numeric(prediction$pred[1])
+  
+  # Calculate residuals
+  residuals_vector[i] <- residual
+  
+  if (i > window_size + control_chart_sample_size) {
+    
+    sigma <- sd(residuals_vector[(i - control_chart_sample_size):(i - 1)])
+    
+    # Control limits and center lines
+    CL = 0
+    UCL_open = 3*sigma
+    LCL_open = -3*sigma
+    rolling_control_limits[i] <- LCL_open
+    
+
+    # Signal for terminate position
+
+    UCL_terminate = 2*sigma
+    LCL_terminate = -2*sigma
+    
+    if (Short_Position_Opened == FALSE) {
+      if (residual > UCL_open) {
+        Short_Position_Opened <- TRUE
+        Price_Taken <- FALSE
+      }
+    }
+    
+    if (Long_Position_Opened == FALSE) {
+      if (residual < LCL_open) {
+        Long_Position_Opened <- TRUE
+        Price_Taken <- FALSE
+      }
+    }
+    
+    if (Short_Position_Opened == TRUE) {
+      if (Price_Taken == FALSE){
+        sahol_price <- wide_data22$SAHOL[i]
+        ttkom_price <- wide_data22$TTKOM[i]
+        Price_Taken <- TRUE
+      }
+      if (residual < UCL_terminate) {
+        Short_Position_Opened <- FALSE
+        if (i < length(wide_data22$SAHOL)) {
+          profit <- - ( (wide_data22$SAHOL[i+1])/sahol_price ) + ( (wide_data22$TTKOM[i+1])/ttkom_price )
+          Profits[i+1] <- profit
+        }
+      }
+    }
+    
+    if (Long_Position_Opened == TRUE) {
+      if (Price_Taken == FALSE){
+        sahol_price <- wide_data22$SAHOL[i]
+        ttkom_price <- wide_data22$TTKOM[i]
+        Price_Taken <- TRUE
+      }
+      if (residual > LCL_terminate) {
+        Long_Position_Opened <- FALSE
+        if (i < length(wide_data22$SAHOL)) {
+          profit <- ( (wide_data22$SAHOL[i+1])/sahol_price ) - ( (wide_data22$TTKOM[i+1])/ttkom_price )
+          Profits[i+1] <- profit
+        }
+      }
+    }   
+   
+     
+  }
+  
+
+}
+
+# Plot residuals and control limits
+residuals_vector_ts <- xts(residuals_vector, order.by = wide_data22$timestamp)
+upper_control_limits_ts <- xts(-rolling_control_limits, order.by = wide_data22$timestamp)
+lower_control_limits_ts <- xts(rolling_control_limits, order.by = wide_data22$timestamp)
+
+residual_and_control_limits <- cbind(upper_control_limits_ts, residuals_vector_ts, lower_control_limits_ts)
+
+
+# Plot residuals and control limits
+plot(residual_and_control_limits, col = c("red", "blue", "red"), lty = 1, main = "Residuals of ARIMAX Model of SAHOL and TTKOM 2022",
+     ylab = "Residual", xlab = "Time")
+legend("topright", legend = c("Upper Control Limits", "Residuals", "Lower Control Limits"),
+       col = c("red", "blue", "red"), lty = 1, cex = 0.8)
+
+# Plot profits
+profit_ts <- xts(Profits, order.by = wide_data22$timestamp)
+plot(profit_ts, lty = 1, main = "Profits made after the termination of each position",
+     ylab = "Profit", xlab = "Time")
+
+print(paste("Total Profit =", sum(Profits)))
+
+```
+
+# Testing the Models in 2023
+
+```{r}
+# Data files for 2023
+
+data_2023Q1 <- read.csv("/Users/sudeyilmaz/Desktop/IE\ 423/20180101_20231121_bist30/20221226_20230326_bist30.csv", header = TRUE)
+data_2023Q2 <- read.csv("/Users/sudeyilmaz/Desktop/IE\ 423/20180101_20231121_bist30/20230327_20230625_bist30.csv", header = TRUE)
+data_2023Q3 <- read.csv("/Users/sudeyilmaz/Desktop/IE\ 423/20180101_20231121_bist30/20230626_20230924_bist30.csv", header = TRUE)
+data_2023Q4 <- read.csv("/Users/sudeyilmaz/Desktop/IE\ 423/20180101_20231121_bist30/20230925_20231224_bist30.csv", header = TRUE)
+
+
+# Combine quarterly data into one data frame
+test_data_combined <- bind_rows(data_2023Q1, data_2023Q2, data_2023Q3, data_2023Q4)
+
+# Use pivot_wider to convert from long to wide format
+wide_data <- test_data_combined %>%
+  pivot_wider(names_from = short_name, values_from = price)
+
+wide_data$timestamp <- as.POSIXct(wide_data$timestamp)
+```
+
+## TASK 1
+
+### k-sigma Decision:
+
+k-sigma decision for each control limit is made according to the training model. Optimized k values for each model and pair is determined according to maximization of profit in year 2022 with that model.
+
+### Dynamic Control Limits:
+
+After various number of trials, a long term period and stock pairs which are proper for constant variance assumption couldn't have been found. Thus, a more dynamic approach is used. Each residual is calculated from a prediction made with using the last 100 data points. And to check if the residual is in control, dynamic control limits are used. Such that for each residual, a different control limits are set using the variance of last 100 residuals. This ensures that the control limits adapt to changes in the underlying data distribution.
+
+### Control Limits:
+
+UCL_open and LCL_open: These are the control limits for opening a trading position. They are set at three times the rolling standard deviation of residuals (sigma) above and below the mean (CL). If a residual goes beyond these limits, a trading position is opened.
+
+UCL_terminate and LCL_terminate: These are the control limits for terminating a trading position. They are set at one times the rolling standard deviation of residuals above and below the mean. If a residual goes beyond these limits, a trading position is terminated.
+
+### Trading Position Logic:
+
+It is decided that we can have long and short positions worth 1 unit of money. When a long position is opened for a stock in a pair, a short position is opened for the other stock in that pair, and vice versa. And the profit is calculated as the amount of net unit money we have after the termination of each position. One important matter here is when a signal occurs, it is generally not possible to buy or sell a stock at the moment of signal. Thus, the prices used in this model is taken from the data point right after a signal occurs.
+
+Short Position Opening: If the residual exceeds UCL_open and no short position is currently opened (Short_Position_Opened == FALSE), a short position is opened.
+
+Long Position Opening: If the residual falls below LCL_open and no long position is currently opened (Long_Position_Opened == FALSE), a long position is opened.
+
+Short Position Termination: If a short position is opened and the residual falls below UCL_terminate, the short position is terminated, and profits are calculated.
+
+Long Position Termination: If a long position is opened and the residual exceeds LCL_terminate, the long position is terminated, and profits are calculated.
+
+#### Control Limits Visualization:
+
+The control limits are plotted on the same graph as the residuals. This helps visualize when the residuals breach the control limits and correspondingly trigger trading actions.
+
+In summary, control charts in this context are used to establish thresholds for when to open and terminate trading positions based on the observed residuals. They provide a systematic way to detect deviations from the expected behavior and take trading actions accordingly.
+
+# Linear Regression for AKBNK and ISCTR
+
+```{r}
+# Assuming AKBNK and ISCTR are your two lists of length 2506
+
+# Set the window size for the rolling regression
+window_size <- 100
+
+control_chart_sample_size <- 100
+
+# Initialize an empty vector to store residuals
+residuals_vector <- numeric(length(wide_data$AKBNK))
+
+Short_Position_Opened = FALSE
+
+Long_Position_Opened = FALSE
+
+Price_Taken = FALSE
+
+Profits <- numeric(length(wide_data$AKBNK))
+
+rolling_control_limits <- numeric(length(wide_data$AKBNK))
+
+
+# Perform the rolling regression and calculate residuals
+for (i in (window_size + 1):length(wide_data$AKBNK)) {
+  # Extract the current window of data
+  akbnk_window <- wide_data$AKBNK[(i - window_size):(i - 1)]
+  isctr_window <- wide_data$ISCTR[(i - window_size):(i - 1)]
+  
+  # Fit a linear regression model
+  lm_model <- lm(akbnk_window ~ isctr_window)
+  
+  # Make predictions
+  prediction <- predict(lm_model, newdata = list(isctr_window = wide_data$ISCTR[i]))
+  
+  residual <- wide_data$AKBNK[i] - prediction
+  
+  # Calculate residuals
+  residuals_vector[i] <- residual
+  
+  if (i > window_size + control_chart_sample_size) {
+    
+    
+    sigma <- sd(residuals_vector[(i - control_chart_sample_size):(i - 1)])
+    
+    # Control limits and center lines
+    CL = 0
+    UCL_open = 3*sigma
+    LCL_open = -3*sigma
+    rolling_control_limits[i] <- LCL_open
+    
+
+    # Signal for terminate position
+
+    UCL_terminate = 2*sigma
+    LCL_terminate = -2*sigma
+    
+    if (Short_Position_Opened == FALSE) {
+      if (residual > UCL_open) {
+        Short_Position_Opened <- TRUE
+        Price_Taken <- FALSE
+      }
+    }
+    
+    if (Long_Position_Opened == FALSE) {
+      if (residual < LCL_open) {
+        Long_Position_Opened <- TRUE
+        Price_Taken <- FALSE
+      }
+    }
+    
+    if (Short_Position_Opened == TRUE) {
+      if (Price_Taken == FALSE){
+        akbnk_price <- wide_data$AKBNK[i]
+        isctr_price <- wide_data$ISCTR[i]
+        Price_Taken <- TRUE
+      }
+      if (residual < UCL_terminate) {
+        Short_Position_Opened <- FALSE
+        if (i < length(wide_data$AKBNK)) {
+          profit <- - ( (wide_data$AKBNK[i+1])/akbnk_price ) + ( (wide_data$ISCTR[i+1])/isctr_price )
+          Profits[i+1] <- profit
+        }
+      }
+    }
+    
+    if (Long_Position_Opened == TRUE) {
+      if (Price_Taken == FALSE){
+        akbnk_price <- wide_data$AKBNK[i]
+        isctr_price <- wide_data$ISCTR[i]
+        Price_Taken <- TRUE
+      }
+      if (residual > LCL_terminate) {
+        Long_Position_Opened <- FALSE
+        if (i < length(wide_data$AKBNK)) {
+          profit <- ( (wide_data$AKBNK[i+1])/akbnk_price ) - ( (wide_data$ISCTR[i+1])/isctr_price )
+          Profits[i+1] <- profit
+        }
+      }
+    }   
+   
+     
+  }
+  
+
+}
+
+# Plot residuals and control limits
+residuals_vector_ts <- xts(residuals_vector, order.by = wide_data$timestamp)
+upper_control_limits_ts <- xts(-rolling_control_limits, order.by = wide_data$timestamp)
+lower_control_limits_ts <- xts(rolling_control_limits, order.by = wide_data$timestamp)
+
+residual_and_control_limits <- cbind(upper_control_limits_ts, residuals_vector_ts, lower_control_limits_ts)
+
+
+# Plot residuals and control limits
+plot(residual_and_control_limits, col = c("red", "blue", "red"), lty = 1, main = "Residuals of Regression Model of AKBNK and ISCTR ",
+     ylab = "Residual", xlab = "Time")
+legend("topright", legend = c("Upper Control Limits", "Residuals", "Lower Control Limits"),
+       col = c("red", "blue", "red"), lty = 1, cex = 0.8)
+
+# Plot profits
+profit_ts <- xts(Profits, order.by = wide_data$timestamp)
+plot(profit_ts, lty = 1, main = "Profits made after the termination of each position",
+     ylab = "Profit", xlab = "Time")
+
+print(paste("Total Profit =", sum(Profits)))
+
+
+```
+
+# Linear Regression for SAHOL and TTKOM
+
+```{r}
+# Assuming SAHOL and TTKOM are your two lists of length 2506
+
+# Set the window size for the rolling regression
+window_size <- 100
+
+control_chart_sample_size <- 100
+
+# Initialize an empty vector to store residuals
+residuals_vector <- numeric(length(wide_data$SAHOL))
+
+Short_Position_Opened = FALSE
+
+Long_Position_Opened = FALSE
+
+Price_Taken = FALSE
+
+Profits <- numeric(length(wide_data$SAHOL))
+
+rolling_control_limits <- numeric(length(wide_data$SAHOL))
+
+
+# Perform the rolling regression and calculate residuals
+for (i in (window_size + 1):length(wide_data$SAHOL)) {
+  # Extract the current window of data
+  sahol_window <- wide_data$SAHOL[(i - window_size):(i - 1)]
+  ttkom_window <- wide_data$TTKOM[(i - window_size):(i - 1)]
+  
+  # Fit a linear regression model
+  lm_model <- lm(sahol_window ~ ttkom_window)
+  
+  # Make predictions
+  prediction <- predict(lm_model, newdata = list(ttkom_window = wide_data$TTKOM[i]))
+  
+  residual <- wide_data$SAHOL[i] - prediction
+  
+  # Calculate residuals
+  residuals_vector[i] <- residual
+  
+  if (i > window_size + control_chart_sample_size) {
+    
+    
+    sigma <- sd(residuals_vector[(i - control_chart_sample_size):(i - 1)])
+    
+    # Control limits and center lines
+    CL = 0
+    UCL_open = 2*sigma
+    LCL_open = -2*sigma
+    rolling_control_limits[i] <- LCL_open
+    
+
+    # Signal for terminate position
+
+    UCL_terminate = 1*sigma
+    LCL_terminate = -1*sigma
+    
+    if (Short_Position_Opened == FALSE) {
+      if (residual > UCL_open) {
+        Short_Position_Opened <- TRUE
+        Price_Taken <- FALSE
+      }
+    }
+    
+    if (Long_Position_Opened == FALSE) {
+      if (residual < LCL_open) {
+        Long_Position_Opened <- TRUE
+        Price_Taken <- FALSE
+      }
+    }
+    
+    if (Short_Position_Opened == TRUE) {
+      if (Price_Taken == FALSE){
+        sahol_price <- wide_data$SAHOL[i]
+        ttkom_price <- wide_data$TTKOM[i]
+        Price_Taken <- TRUE
+      }
+      if (residual < UCL_terminate) {
+        Short_Position_Opened <- FALSE
+        if (i < length(wide_data$SAHOL)) {
+          profit <- - ( (wide_data$SAHOL[i+1])/sahol_price ) + ( (wide_data$TTKOM[i+1])/ttkom_price )
+          Profits[i+1] <- profit
+        }
+      }
+    }
+    
+    if (Long_Position_Opened == TRUE) {
+      if (Price_Taken == FALSE){
+        sahol_price <- wide_data$SAHOL[i]
+        ttkom_price <- wide_data$TTKOM[i]
+        Price_Taken <- TRUE
+      }
+      if (residual > LCL_terminate) {
+        Long_Position_Opened <- FALSE
+        if (i < length(wide_data$SAHOL)) {
+          profit <- ( (wide_data$SAHOL[i+1])/sahol_price ) - ( (wide_data$TTKOM[i+1])/ttkom_price )
+          Profits[i+1] <- profit
+        }
+      }
+    }   
+   
+     
+  }
+  
+
+}
+
+# Plot residuals and control limits
+residuals_vector_ts <- xts(residuals_vector, order.by = wide_data$timestamp)
+upper_control_limits_ts <- xts(-rolling_control_limits, order.by = wide_data$timestamp)
+lower_control_limits_ts <- xts(rolling_control_limits, order.by = wide_data$timestamp)
+
+residual_and_control_limits <- cbind(upper_control_limits_ts, residuals_vector_ts, lower_control_limits_ts)
+
+
+# Plot residuals and control limits
+plot(residual_and_control_limits, col = c("red", "blue", "red"), lty = 1, main = "Residuals of Regression Model of SAHOL and TTKOM ",
+     ylab = "Residual", xlab = "Time")
+legend("topright", legend = c("Upper Control Limits", "Residuals", "Lower Control Limits"),
+       col = c("red", "blue", "red"), lty = 1, cex = 0.8)
+
+# Plot profits
+profit_ts <- xts(Profits, order.by = wide_data$timestamp)
+plot(profit_ts, lty = 1, main = "Profits made after the termination of each position",
+     ylab = "Profit", xlab = "Time")
+
+print(paste("Total Profit =", sum(Profits)))
+
+```
+
+## TASK 2
+
+### ARIMAX Model Fitting:
+
+Inside the rolling regression loop, an ARIMAX model is fit using the auto.arima function from the forecast package. The model is fitted to predict one stock of each pair with the other stock as a regressor.
+
+### Making Predictions and Calculating Residuals:
+
+Predictions are made using the fitted ARIMAX model, and residuals are calculated as the difference between the observed stock value and the predicted value.
+
+### k-sigma Decision:
+
+k-sigma decision for each control limit is made according to the training model. Optimized k values for each model and pair is determined according to maximization of profit in year 2022 with that model.
+
+### Control Limits Calculation:
+
+Control limits are calculated similarly to the basic strategy, using the rolling standard deviation of residuals.
+
+### Trading Position Logic:
+
+Trading positions are opened or terminated based on the residuals breaching control limits, similar to the basic strategy.
+
+### Visualization:
+
+Residuals and control limits are plotted over time to visualize the performance of the ARIMAX model. Profits made after the termination of each position are also plotted.
+
+### ARIMAX for AKBNK and ISCTR
+
+```{r}
+# Assuming AKBNK and ISCTR are your two lists of length 2506
+
+# Set the window size for the rolling regression
+window_size <- 100
+
+control_chart_sample_size <- 100
+
+# Initialize an empty vector to store residuals
+residuals_vector <- numeric(length(wide_data$AKBNK))
+
+Short_Position_Opened = FALSE
+
+Long_Position_Opened = FALSE
+
+Price_Taken = FALSE
+
+Profits <- numeric(length(wide_data$AKBNK))
+
+rolling_control_limits <- numeric(length(wide_data$AKBNK))
+
+# Perform the rolling regression and calculate residuals
+for (i in (window_size + 1):length(wide_data$AKBNK)) {
+  # Extract the current window of data
+  akbnk_window <- wide_data$AKBNK[(i - window_size):(i - 1)]
+  isctr_window <- wide_data$ISCTR[(i - window_size):(i - 1)]
+
+  # Fit an ARIMAX model to AKBNK with ISCTR as regressor
+  arimax_model <- auto.arima(akbnk_window, xreg = isctr_window)
+  
+  
+  # Make predictions
+  prediction <- predict(arimax_model, newxreg = wide_data$ISCTR[i])
+  
+  # Calculate residuals
+  residual <- as.numeric(wide_data$AKBNK[i]) - as.numeric(prediction$pred[1])
+  
+  # Calculate residuals
+  residuals_vector[i] <- residual
+  
+  if (i > window_size + control_chart_sample_size) {
+    
+    sigma <- sd(residuals_vector[(i - control_chart_sample_size):(i - 1)])
+    
+    # Control limits and center lines
+    CL = 0
+    UCL_open = 3*sigma
+    LCL_open = -3*sigma
+    rolling_control_limits[i] <- LCL_open
+    
+
+    # Signal for terminate position
+
+    UCL_terminate = 1*sigma
+    LCL_terminate = -1*sigma
+    
+    if (Short_Position_Opened == FALSE) {
+      if (residual > UCL_open) {
+        Short_Position_Opened <- TRUE
+        Price_Taken <- FALSE
+      }
+    }
+    
+    if (Long_Position_Opened == FALSE) {
+      if (residual < LCL_open) {
+        Long_Position_Opened <- TRUE
+        Price_Taken <- FALSE
+      }
+    }
+    
+    if (Short_Position_Opened == TRUE) {
+      if (Price_Taken == FALSE){
+        akbnk_price <- wide_data$AKBNK[i]
+        isctr_price <- wide_data$ISCTR[i]
+        Price_Taken <- TRUE
+      }
+      if (residual < UCL_terminate) {
+        Short_Position_Opened <- FALSE
+        if (i < length(wide_data$AKBNK)) {
+          profit <- - ( (wide_data$AKBNK[i+1])/akbnk_price ) + ( (wide_data$ISCTR[i+1])/isctr_price )
+          Profits[i+1] <- profit
+        }
+      }
+    }
+    
+    if (Long_Position_Opened == TRUE) {
+      if (Price_Taken == FALSE){
+        akbnk_price <- wide_data$AKBNK[i]
+        isctr_price <- wide_data$ISCTR[i]
+        Price_Taken <- TRUE
+      }
+      if (residual > LCL_terminate) {
+        Long_Position_Opened <- FALSE
+        if (i < length(wide_data$AKBNK)) {
+          profit <- ( (wide_data$AKBNK[i+1])/akbnk_price ) - ( (wide_data$ISCTR[i+1])/isctr_price )
+          Profits[i+1] <- profit
+        }
+      }
+    }   
+   
+     
+  }
+  
+
+}
+
+# Plot residuals and control limits
+residuals_vector_ts <- xts(residuals_vector, order.by = wide_data$timestamp)
+upper_control_limits_ts <- xts(-rolling_control_limits, order.by = wide_data$timestamp)
+lower_control_limits_ts <- xts(rolling_control_limits, order.by = wide_data$timestamp)
+
+residual_and_control_limits <- cbind(upper_control_limits_ts, residuals_vector_ts, lower_control_limits_ts)
+
+
+# Plot residuals and control limits
+plot(residual_and_control_limits, col = c("red", "blue", "red"), lty = 1, main = "Residuals of ARIMAX Model of AKBNK and ISCTR ",
+     ylab = "Residual", xlab = "Time")
+legend("topright", legend = c("Upper Control Limits", "Residuals", "Lower Control Limits"),
+       col = c("red", "blue", "red"), lty = 1, cex = 0.8)
+
+# Plot profits
+profit_ts <- xts(Profits, order.by = wide_data$timestamp)
+plot(profit_ts, lty = 1, main = "Profits made after the termination of each position",
+     ylab = "Profit", xlab = "Time")
+
+print(paste("Total Profit =", sum(Profits)))
+
+```
+
+# ARIMAX for SAHOL and TTKOM
+
+```{r}
+# Assuming SAHOL and TTKOM are your two lists of length 2506
+
+# Set the window size for the rolling regression
+window_size <- 100
+
+control_chart_sample_size <- 100
+
+# Initialize an empty vector to store residuals
+residuals_vector <- numeric(length(wide_data$SAHOL))
+
+Short_Position_Opened = FALSE
+
+Long_Position_Opened = FALSE
+
+Price_Taken = FALSE
+
+Profits <- numeric(length(wide_data$SAHOL))
+
+rolling_control_limits <- numeric(length(wide_data$SAHOL))
+
+# Perform the rolling regression and calculate residuals
+for (i in (window_size + 1):length(wide_data$SAHOL)) {
+  # Extract the current window of data
+  sahol_window <- wide_data$SAHOL[(i - window_size):(i - 1)]
+  ttkom_window <- wide_data$TTKOM[(i - window_size):(i - 1)]
+
+  # Fit an ARIMAX model to SAHOL with TTKOM as regressor
+  arimax_model <- auto.arima(sahol_window, xreg = ttkom_window)
+  
+  # Make predictions
+  prediction <- predict(arimax_model, newxreg = wide_data$TTKOM[i])
+  
+  # Calculate residuals
+  residual <- as.numeric(wide_data$SAHOL[i]) - as.numeric(prediction$pred[1])
+  
+  # Calculate residuals
+  residuals_vector[i] <- residual
+  
+  if (i > window_size + control_chart_sample_size) {
+    
+    sigma <- sd(residuals_vector[(i - control_chart_sample_size):(i - 1)])
+    
+    # Control limits and center lines
+    CL = 0
+    UCL_open = 3*sigma
+    LCL_open = -3*sigma
+    rolling_control_limits[i] <- LCL_open
+    
+
+    # Signal for terminate position
+
+    UCL_terminate = 2*sigma
+    LCL_terminate = -2*sigma
+    
+    if (Short_Position_Opened == FALSE) {
+      if (residual > UCL_open) {
+        Short_Position_Opened <- TRUE
+        Price_Taken <- FALSE
+      }
+    }
+    
+    if (Long_Position_Opened == FALSE) {
+      if (residual < LCL_open) {
+        Long_Position_Opened <- TRUE
+        Price_Taken <- FALSE
+      }
+    }
+    
+    if (Short_Position_Opened == TRUE) {
+      if (Price_Taken == FALSE){
+        sahol_price <- wide_data$SAHOL[i]
+        ttkom_price <- wide_data$TTKOM[i]
+        Price_Taken <- TRUE
+      }
+      if (residual < UCL_terminate) {
+        Short_Position_Opened <- FALSE
+        if (i < length(wide_data$SAHOL)) {
+          profit <- - ( (wide_data$SAHOL[i+1])/sahol_price ) + ( (wide_data$TTKOM[i+1])/ttkom_price )
+          Profits[i+1] <- profit
+        }
+      }
+    }
+    
+    if (Long_Position_Opened == TRUE) {
+      if (Price_Taken == FALSE){
+        sahol_price <- wide_data$SAHOL[i]
+        ttkom_price <- wide_data$TTKOM[i]
+        Price_Taken <- TRUE
+      }
+      if (residual > LCL_terminate) {
+        Long_Position_Opened <- FALSE
+        if (i < length(wide_data$SAHOL)) {
+          profit <- ( (wide_data$SAHOL[i+1])/sahol_price ) - ( (wide_data$TTKOM[i+1])/ttkom_price )
+          Profits[i+1] <- profit
+        }
+      }
+    }   
+   
+     
+  }
+  
+
+}
+
+# Plot residuals and control limits
+residuals_vector_ts <- xts(residuals_vector, order.by = wide_data$timestamp)
+upper_control_limits_ts <- xts(-rolling_control_limits, order.by = wide_data$timestamp)
+lower_control_limits_ts <- xts(rolling_control_limits, order.by = wide_data$timestamp)
+
+residual_and_control_limits <- cbind(upper_control_limits_ts, residuals_vector_ts, lower_control_limits_ts)
+
+
+# Plot residuals and control limits
+plot(residual_and_control_limits, col = c("red", "blue", "red"), lty = 1, main = "Residuals of ARIMAX Model of SAHOL and TTKOM ",
+     ylab = "Residual", xlab = "Time")
+legend("topright", legend = c("Upper Control Limits", "Residuals", "Lower Control Limits"),
+       col = c("red", "blue", "red"), lty = 1, cex = 0.8)
+
+# Plot profits
+profit_ts <- xts(Profits, order.by = wide_data$timestamp)
+plot(profit_ts, lty = 1, main = "Profits made after the termination of each position",
+     ylab = "Profit", xlab = "Time")
+
+print(paste("Total Profit =", sum(Profits)))
+
+```
+
+# Discussion
+
+## Linear Regression Approach:
+
+### Linear regression model for Pair 1:
+
+AKBNK and ISCTR yielded a slightly negative profit(-0.09) which may suggest that the linear regression model struggled to capture the relationship between the two stocks in Pair 1. It might indicate that the assumed linear relationship is not a good fit for the historical data, or the model might be sensitive to outliers or sudden real life market changes.
+
+### Linear regression model for Pair 2:
+
+SAHOL and TTKOM yielded positive profit(0.04) which suggests some effectiveness in predicting price movements for Pair 2. However, the modest profit raises questions about the robustness of the model and its ability to adapt to changing market conditions.
+
+### Some Limitations of This Approach:
+
+#### Assumption of Linearity:
+
+Linear regression assumes a linear relationship between variables, which may not hold in the dynamic and non-linear nature of stock prices.
+
+#### Sensitivity to Outliers:
+
+Linear regression models can be sensitive to outliers, and the presence of extreme stock price movements might affect the model's performance.
+
+## ARIMAX Approach:
+
+### ARIMAX Model for Pair1:
+
+AKBNK and ISCTR yielded a high positive profit(0.15) which suggests better performance compared to the linear regression model for Pair 1. ARIMAX models incorporate time-series dynamics, which may have helped capture more complex patterns in stock price movements.
+
+### ARIMAX Model for Pair2:
+
+SAHOL and TTKOM yielded negative profit(-0.05) implies that the ARIMAX model faced challenges in predicting price movements for Pair 2. This could be due to model's inability to adapt to sudden changes.
+
+### Some Limitations of This Approach:
+
+#### Assumption of Stationarity:
+
+ARIMAX models assume stationarity, meaning that statistical properties of the time series do not change over time. Stock prices often exhibit non-stationary behavior, introducing challenges for ARIMAX models.
+
+#### Limited Feature Consideration:
+
+Both models might not have considered all relevant features influencing stock prices. Macro-economic factors, news sentiment, or global events could significantly impact stock prices, and these might not have been adequately captured.
+
+#### Real-world Volatility:
+
+The dynamic nature of stock prices introduces challenges for both models. The real-time evolution of financial markets, unforeseen events, and sudden changes can affect the models' predictive accuracy.
+
+We have tried to overcome these challenges by "Continuous Monitoring": Stock markets are highly dynamic, and models should be continuously monitored and adapted to changing market conditions by changing the model parameters and control limits. What works well in one period might not be effective in another.
+
+# Comparison
+
+The ARIMAX model, despite its limitations, seems to have performed slightly better overall compared to the linear regression models. This could be attributed to its ability to capture time-series dynamics.
+
+Both models, however, demonstrate the challenges of predicting stock prices in real-world conditions. The results highlight the importance of ongoing model refinement, adaptation to changing market conditions, and consideration of a broader set of features for more accurate predictions.
